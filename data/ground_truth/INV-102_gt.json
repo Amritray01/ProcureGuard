@@ -1,0 +1,9 @@
+{
+  "invoice_id": "INV-102",
+  "expected_decision": "needs_review",
+  "expected_reasons": [
+    "PRICE_VARIANCE"
+  ],
+  "description": "Unit price inflated from $600.00 to $750.00 per unit ($600 overcharge).",
+  "ground_truth_total": "3150.00"
+}

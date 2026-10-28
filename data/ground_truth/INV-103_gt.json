@@ -1,0 +1,9 @@
+{
+  "invoice_id": "INV-103",
+  "expected_decision": "needs_review",
+  "expected_reasons": [
+    "MISSING_REQUIRED_FIELD"
+  ],
+  "description": "Omitted vendor and line items to trigger Human-In-The-Loop review.",
+  "ground_truth_total": "0.00"
+}

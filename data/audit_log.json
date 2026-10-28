@@ -1,0 +1,29 @@
+{
+  "INV-102": {
+    "invoice_id": "INV-102",
+    "reviewer_id": "Senior_Auditor",
+    "action": "approve",
+    "notes": "Auditor manual assessment",
+    "overridden_reasons": [],
+    "corrected_data": {},
+    "timestamp": "2026-10-28T19:36:57.171221+00:00"
+  },
+  "INV-103": {
+    "invoice_id": "INV-103",
+    "reviewer_id": "Senior_Auditor",
+    "action": "flag_for_correction",
+    "notes": "Auditor manual assessment",
+    "overridden_reasons": [],
+    "corrected_data": {},
+    "timestamp": "2026-10-28T19:37:02.235317+00:00"
+  },
+  "INV-105": {
+    "invoice_id": "INV-105",
+    "reviewer_id": "Senior_Auditor",
+    "action": "reject",
+    "notes": "Auditor manual sign-off",
+    "overridden_reasons": [],
+    "corrected_data": {},
+    "timestamp": "2026-10-28T20:24:13.855910+00:00"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "invoice_id": "INV-105",
+  "expected_decision": "reject",
+  "expected_reasons": [
+    "UNAUTHORIZED_SURCHARGE"
+  ],
+  "description": "$150 unauthorized freight surcharge strictly banned by Master Contract.",
+  "ground_truth_total": "990.00"
+}
