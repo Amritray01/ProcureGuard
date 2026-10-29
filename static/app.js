@@ -1,5 +1,8 @@
 // Frontend Controller for Session-Based Multi-Agent Procurement Auditor
 
+const MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024; // 25 MB cap per file
+const MAX_INVOICE_COUNT = 25; // Max 25 invoices per batch
+
 let activeSessionId = null;
 let sessionInvoices = [];
 let sessionResults = {};
@@ -76,14 +79,24 @@ function resetToUploadPortalUI() {
   document.getElementById("main-nav-tabs").style.display = "none";
   document.getElementById("btn-new-session").style.display = "none";
 
-  // Reset status text
+  // Reset status text & classes
   document.getElementById("status-invoices").textContent = "No files selected";
   document.getElementById("status-pos").textContent = "No file selected";
   document.getElementById("status-receipts").textContent = "No file selected";
   document.getElementById("status-contracts").textContent = "No file selected";
 
-  document.querySelectorAll(".upload-card").forEach(c => c.classList.remove("has-file"));
+  const listEl = document.getElementById("list-invoices");
+  if (listEl) {
+    listEl.style.display = "none";
+    listEl.innerHTML = "";
+  }
 
+  document.querySelectorAll(".upload-card").forEach(c => {
+    c.classList.remove("has-file");
+    c.classList.remove("has-error");
+  });
+
+  resetChatbot(null);
   showScreen("screen-portal");
 }
 
@@ -94,34 +107,83 @@ async function resetToUploadPortal() {
   resetToUploadPortalUI();
 }
 
-// --- File Selection Handlers ---
+// --- File Selection Handlers with File Cap Enforcement ---
 function handleFileSelected(type, input) {
   const card = document.getElementById(`card-${type}`);
   const status = document.getElementById(`status-${type}`);
 
   if (type === "invoices") {
-    stagedFiles.invoices = Array.from(input.files);
-    if (stagedFiles.invoices.length > 0) {
-      status.textContent = `✓ Selected ${stagedFiles.invoices.length} invoice(s). Uploading & starting audit workflow...`;
-      card.classList.add("has-file");
-      // Immediate auto-launch so nothing is stalled
-      setTimeout(() => {
-        startWorkflowExecution();
-      }, 400);
-    } else {
+    const files = Array.from(input.files);
+    const listEl = document.getElementById("list-invoices");
+
+    if (files.length === 0) {
       status.textContent = "No files selected";
-      card.classList.remove("has-file");
+      card.classList.remove("has-file", "has-error");
+      if (listEl) listEl.style.display = "none";
+      stagedFiles.invoices = [];
+      return;
     }
+
+    // 1. File Count Cap: Max 25
+    if (files.length > MAX_INVOICE_COUNT) {
+      status.innerHTML = `<span style="color: #f87171;">⚠️ Cap Exceeded: Maximum ${MAX_INVOICE_COUNT} invoices allowed (${files.length} selected).</span>`;
+      card.classList.add("has-error");
+      card.classList.remove("has-file");
+      if (listEl) listEl.style.display = "none";
+      stagedFiles.invoices = [];
+      return;
+    }
+
+    // 2. File Size Cap: Max 25 MB per file
+    for (const f of files) {
+      if (f.size > MAX_FILE_SIZE_BYTES) {
+        const mb = (f.size / (1024 * 1024)).toFixed(1);
+        status.innerHTML = `<span style="color: #f87171;">⚠️ Cap Exceeded: <b>${f.name}</b> (${mb} MB) exceeds 25 MB cap.</span>`;
+        card.classList.add("has-error");
+        card.classList.remove("has-file");
+        if (listEl) listEl.style.display = "none";
+        stagedFiles.invoices = [];
+        return;
+      }
+    }
+
+    // Successfully staged in JS memory; user clicks bottom button to upload
+    card.classList.remove("has-error");
+    card.classList.add("has-file");
+    stagedFiles.invoices = files;
+
+    const totalKB = (files.reduce((sum, f) => sum + f.size, 0) / 1024).toFixed(0);
+    status.innerHTML = `<b>✓ Staged ${files.length} invoice(s)</b> (${totalKB} KB total). Click Start below to upload.`;
+
+    if (listEl) {
+      listEl.style.display = "block";
+      listEl.innerHTML = files.map(f => `<div>📄 ${f.name} <span style="color: var(--text-muted);">(${(f.size/1024).toFixed(0)} KB)</span></div>`).join("");
+    }
+
   } else {
     const file = input.files[0];
-    stagedFiles[type] = file || null;
-    if (file) {
-      status.textContent = `✓ Loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
-      card.classList.add("has-file");
-    } else {
+    if (!file) {
       status.textContent = "No file selected";
-      card.classList.remove("has-file");
+      card.classList.remove("has-file", "has-error");
+      stagedFiles[type] = null;
+      return;
     }
+
+    // File Size Cap: Max 25 MB
+    if (file.size > MAX_FILE_SIZE_BYTES) {
+      const mb = (file.size / (1024 * 1024)).toFixed(1);
+      status.innerHTML = `<span style="color: #f87171;">⚠️ Cap Exceeded: ${(file.size / (1024 * 1024)).toFixed(1)} MB exceeds 25 MB cap.</span>`;
+      card.classList.add("has-error");
+      card.classList.remove("has-file");
+      stagedFiles[type] = null;
+      return;
+    }
+
+    card.classList.remove("has-error");
+    card.classList.add("has-file");
+    stagedFiles[type] = file;
+    const label = type === "pos" ? "Purchase Orders Table" : type === "receipts" ? "Good Orders Table" : "Contracts";
+    status.innerHTML = `<b>✓ Staged:</b> ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
   }
 }
 

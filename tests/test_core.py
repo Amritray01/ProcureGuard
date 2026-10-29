@@ -468,3 +468,104 @@ def test_session_folder_persistence_and_parallel_workflow(tmp_path):
     assert (tmp_path / "sessions" / "sess_test_123" / "session_metadata.json").exists()
 
 
+def test_dynamic_table_parser_independent_of_filename():
+    """Verify orders parser dynamically handles arbitrary file names and header synonyms."""
+    from src.core.table_parser import (
+        detect_document_type,
+        parse_goods_receipts,
+        parse_purchase_orders,
+    )
+
+    # 1. Arbitrary named CSV with non-standard header synonyms for Purchase Orders
+    po_custom_csv = (
+        "PONum,Seller,Street,Date,Curr,Line,Part_No,Item_Desc,Qty,Rate\n"
+        "PO-CUSTOM-99,Acme Supplies,100 Main St,2026-11-01,USD,1,SKU-A,Precision Drill,5,120.00\n"
+        "PO-CUSTOM-99,Acme Supplies,100 Main St,2026-11-01,USD,2,SKU-B,Replacement Bit,10,15.50\n"
+    )
+    assert detect_document_type(po_custom_csv, filename="random_export_123.dat") == "purchase_orders"
+    orders = parse_purchase_orders(po_custom_csv, filename="unrelated_file.foo")
+    assert "PO-CUSTOM-99" in orders
+    po = orders["PO-CUSTOM-99"]
+    assert po.vendor == "Acme Supplies"
+    assert po.vendor_address == "100 Main St"
+    assert len(po.lines) == 2
+    assert po.lines[0].unit_price == Decimal("120.00")
+    assert po.lines[1].quantity == Decimal("10.0")
+
+    # 2. Arbitrary named TSV with non-standard header synonyms for Good Orders / Receipts
+    gr_custom_tsv = (
+        "gr_no\tpo\tdelivery_date\tline\tpart_no\tdelivered_qty\n"
+        "GR-CUSTOM-99\tPO-CUSTOM-99\t2026-11-05\t1\tSKU-A\t5\n"
+        "GR-CUSTOM-99\tPO-CUSTOM-99\t2026-11-05\t2\tSKU-B\t10\n"
+    )
+    assert detect_document_type(gr_custom_tsv, filename="scan_batch.txt") == "goods_receipts"
+    receipts = parse_goods_receipts(gr_custom_tsv, filename="unrelated_log.tsv")
+    assert "PO-CUSTOM-99" in receipts
+    gr = receipts["PO-CUSTOM-99"]
+    assert gr.receipt_id == "GR-CUSTOM-99"
+    assert len(gr.lines) == 2
+    assert gr.lines[0].quantity_received == Decimal("5.0")
+
+
+def test_separate_dynamic_contract_clauses_parser():
+    """Verify separate contract clause parser extracts legal terms from text/markdown and tables."""
+    from src.core.table_parser import parse_contract_clauses
+
+    # 1. Plain text / markdown contract with headings
+    contract_text = (
+        "# Master Procurement Agreement\n\n"
+        "Section 1: Pricing and Invoicing\n"
+        "All supplier prices shall remain firm for the agreement duration. Payment terms are net 30 days.\n\n"
+        "Section 2: Surcharges and Freight\n"
+        "Supplier shall not invoice any separate freight fees or fuel surcharge. All fees are all-inclusive.\n"
+    )
+    clauses = parse_contract_clauses(contract_text, filename="custom_agreement.txt")
+    assert len(clauses) >= 2
+    # Verify surcharge prohibition was detected in Section 2
+    surcharge_clause = next((c for c in clauses if "Section 2" in c.title or "Surcharges" in c.title or c.prohibits_surcharges), None)
+    assert surcharge_clause is not None
+    assert surcharge_clause.prohibits_surcharges is True
+
+    # 2. Tabular CSV contract clauses
+    clauses_csv = (
+        "clause_id,vendor,title,category,prohibits_surcharges,content\n"
+        "CL-101,Apex Supply,Delivery Terms,fees,true,No fuel surcharges permitted under any circumstances.\n"
+    )
+    parsed_csv_clauses = parse_contract_clauses(clauses_csv, filename="clauses_table.csv")
+    assert len(parsed_csv_clauses) == 1
+    assert parsed_csv_clauses[0].clause_id == "CL-101"
+    assert parsed_csv_clauses[0].prohibits_surcharges is True
+
+
+def test_sample_pack_uses_csv_orders_format():
+    """Verify benchmark sample dataset generates and packages orders in CSV format."""
+    from pathlib import Path
+    import zipfile
+    from src.synth.dataset_gen import generate_synthetic_dataset
+
+    data_dir = Path("data")
+    manifest = generate_synthetic_dataset(data_dir)
+
+    po_csv = data_dir / "purchase_orders.csv"
+    gr_csv = data_dir / "goods_receipts.csv"
+    assert po_csv.exists(), "purchase_orders.csv must be present"
+    assert gr_csv.exists(), "goods_receipts.csv must be present"
+
+    # Verify CSV content
+    po_text = po_csv.read_text(encoding="utf-8")
+    assert "po_number,vendor" in po_text
+    assert "PO-2026-001" in po_text
+
+    gr_text = gr_csv.read_text(encoding="utf-8")
+    assert "receipt_id,po_number" in gr_text
+    assert "GR-2026-001" in gr_text
+
+    # Verify ZIP archive contents
+    zip_path = data_dir / "sample_procurement_documents.zip"
+    assert zip_path.exists()
+    with zipfile.ZipFile(zip_path, "r") as zf:
+        namelist = zf.namelist()
+        assert "purchase_orders.csv" in namelist
+        assert "goods_receipts.csv" in namelist
+
+

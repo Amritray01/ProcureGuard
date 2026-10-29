@@ -42,12 +42,18 @@ from src.hitl.review_manager import HITLReviewManager
 from src.synth.dataset_gen import generate_synthetic_dataset
 from src.core.llm import llm_client
 from src.core.session_manager import AuditSession, SessionManager
+from src.core.table_parser import (
+    export_goods_receipts_to_csv,
+    export_purchase_orders_to_csv,
+    parse_contract_clauses,
+    parse_goods_receipts,
+    parse_purchase_orders,
+)
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
-UPLOADS_DIR = DATA_DIR / "uploads"
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB limit
+MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB file cap
+MAX_INVOICE_COUNT = 25  # Max 25 invoices per batch
 
 app = FastAPI(
     title="Procurement Invoice & Contract Auditor API",
@@ -115,97 +121,102 @@ async def start_session_workflow(
     # 1. Initialize new session workspace
     session = session_manager.create_session()
 
+    # Enforce invoice count file cap
+    if len(invoices) > MAX_INVOICE_COUNT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Maximum invoice file cap exceeded ({len(invoices)} files provided). Limit is {MAX_INVOICE_COUNT} invoices per session.",
+        )
+
     invoice_files: List[Tuple[str, bytes]] = []
     contracts_data: List[Dict[str, Any]] = []
 
     if use_sample_pack:
         # Load verified sample benchmark files into this session workspace
-        if not (DATA_DIR / "purchase_orders.json").exists():
+        if not (DATA_DIR / "purchase_orders.csv").exists() and not (DATA_DIR / "purchase_orders.json").exists():
             generate_synthetic_dataset(DATA_DIR)
 
-        # Invoices
+        # Invoices (loaded directly into memory for isolated session persistence)
         sample_pdf_dir = DATA_DIR / "invoices"
         if sample_pdf_dir.exists():
-            for p_file in sample_pdf_dir.glob("*.pdf"):
-                raw_bytes = p_file.read_bytes()
-                with open(UPLOADS_DIR / p_file.name, "wb") as f:
-                    f.write(raw_bytes)
-                invoice_files.append((p_file.name, raw_bytes))
+            for p_file in sorted(sample_pdf_dir.glob("*.pdf")):
+                invoice_files.append((p_file.name, p_file.read_bytes()))
 
-        # POs
-        with open(DATA_DIR / "purchase_orders.json", "r", encoding="utf-8") as f:
-            for p in json.load(f):
-                po = PurchaseOrder(**p)
-                session.purchase_orders[po.po_number] = po
+        # Orders strictly loaded from CSV file format for sample docs
+        po_csv = DATA_DIR / "purchase_orders.csv"
+        if po_csv.exists():
+            session.purchase_orders = parse_purchase_orders(po_csv.read_bytes())
+        elif (DATA_DIR / "purchase_orders.json").exists():
+            session.purchase_orders = parse_purchase_orders((DATA_DIR / "purchase_orders.json").read_bytes())
 
-        # Goods Receipts
-        with open(DATA_DIR / "goods_receipts.json", "r", encoding="utf-8") as f:
-            for g in json.load(f):
-                gr = GoodsReceipt(**g)
-                session.goods_receipts[gr.po_number] = gr
+        # Good Orders / Receipts strictly loaded from CSV file format for sample docs
+        gr_csv = DATA_DIR / "goods_receipts.csv"
+        if gr_csv.exists():
+            session.goods_receipts = parse_goods_receipts(gr_csv.read_bytes())
+        elif (DATA_DIR / "goods_receipts.json").exists():
+            session.goods_receipts = parse_goods_receipts((DATA_DIR / "goods_receipts.json").read_bytes())
 
-        # Contracts
-        with open(DATA_DIR / "contracts.json", "r", encoding="utf-8") as f:
-            contracts_data = json.load(f)
+        # Contracts loaded dynamically
+        if (DATA_DIR / "contracts.json").exists():
+            c_raw = (DATA_DIR / "contracts.json").read_bytes()
+            contracts_data = [c.model_dump() for c in parse_contract_clauses(c_raw)]
 
     else:
-        # Process user-uploaded files
+        # Process user-uploaded tabular and document files dynamically (name-independent)
         if purchase_orders:
             po_bytes = await purchase_orders.read()
+            if len(po_bytes) > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail="Purchase Orders file exceeds 25 MB cap.")
             try:
-                po_list = json.loads(po_bytes.decode("utf-8"))
-                for p in po_list:
-                    po = PurchaseOrder(**p)
-                    session.purchase_orders[po.po_number] = po
+                session.purchase_orders = parse_purchase_orders(po_bytes, filename=purchase_orders.filename)
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid PO JSON format: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid PO table format: {str(e)}")
 
         if goods_receipts:
             gr_bytes = await goods_receipts.read()
+            if len(gr_bytes) > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail="Goods Receipts file exceeds 25 MB cap.")
             try:
-                gr_list = json.loads(gr_bytes.decode("utf-8"))
-                for g in gr_list:
-                    gr = GoodsReceipt(**g)
-                    session.goods_receipts[gr.po_number] = gr
+                session.goods_receipts = parse_goods_receipts(gr_bytes, filename=goods_receipts.filename)
             except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid Goods Receipt JSON format: {str(e)}")
+                raise HTTPException(status_code=400, detail=f"Invalid Good Orders / Receipt table format: {str(e)}")
 
         if contracts:
             c_bytes = await contracts.read()
+            if len(c_bytes) > MAX_FILE_SIZE_BYTES:
+                raise HTTPException(status_code=413, detail="Contracts file exceeds 25 MB cap.")
             try:
-                contracts_data = json.loads(c_bytes.decode("utf-8"))
-            except Exception:
-                # Fallback: treat text file as a contract clause
-                contracts_data = [{
-                    "clause_id": "UPLOADED-CONTRACT-1",
-                    "vendor": "Contractor",
-                    "title": "Uploaded Terms & Conditions",
-                    "content": c_bytes.decode("utf-8", errors="ignore"),
-                    "category": "pricing",
-                    "prohibits_surcharges": True,
-                }]
+                clauses = parse_contract_clauses(c_bytes, filename=contracts.filename)
+                contracts_data = [c.model_dump() for c in clauses]
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Failed to parse contract clauses: {str(e)}")
 
         for inv_file in invoices:
             content = await inv_file.read()
             if len(content) > MAX_FILE_SIZE_BYTES:
-                raise HTTPException(status_code=413, detail=f"File {inv_file.filename} exceeds 15 MB limit.")
+                raise HTTPException(status_code=413, detail=f"File {inv_file.filename} exceeds 25 MB limit.")
             if not content.startswith(b"%PDF-"):
                 raise HTTPException(status_code=400, detail=f"File {inv_file.filename} is not a valid PDF document.")
             fname = Path(inv_file.filename or "invoice.pdf").name
-            # Save into data/uploads/
-            with open(UPLOADS_DIR / fname, "wb") as f:
-                f.write(content)
+            # Store only one copy: directly in session invoices folder during extraction
             invoice_files.append((fname, content))
 
     if not invoice_files:
         raise HTTPException(status_code=400, detail="No invoice documents provided for auditing.")
 
-    # Save session POs and Receipts to disk
-    with open(session.session_dir / "purchase_orders.json", "w", encoding="utf-8") as f:
-        json.dump([p.model_dump(mode="json") for p in session.purchase_orders.values()], f, indent=2)
+    # Save session POs and Receipts to session directory (both tabular CSV and JSON)
+    po_list = list(session.purchase_orders.values())
+    gr_list = list(session.goods_receipts.values())
 
+    with open(session.session_dir / "purchase_orders.csv", "w", encoding="utf-8") as f:
+        f.write(export_purchase_orders_to_csv(po_list))
+    with open(session.session_dir / "purchase_orders.json", "w", encoding="utf-8") as f:
+        json.dump([p.model_dump(mode="json") for p in po_list], f, indent=2)
+
+    with open(session.session_dir / "goods_receipts.csv", "w", encoding="utf-8") as f:
+        f.write(export_goods_receipts_to_csv(gr_list))
     with open(session.session_dir / "goods_receipts.json", "w", encoding="utf-8") as f:
-        json.dump([g.model_dump(mode="json") for g in session.goods_receipts.values()], f, indent=2)
+        json.dump([g.model_dump(mode="json") for g in gr_list], f, indent=2)
 
     # --- Step 1: Parallel Contract Chunking & Vector DB Indexing ---
     await session.step_chunk_contracts_parallel(contracts_data)
@@ -408,13 +419,11 @@ async def audit_uploaded_pdf(file: UploadFile = File(...)):
     """Upload single PDF invoice into an active or new session workspace."""
     content = await file.read()
     if len(content) > MAX_FILE_SIZE_BYTES:
-        raise HTTPException(status_code=413, detail="File size exceeds limit of 15 MB.")
+        raise HTTPException(status_code=413, detail="File size exceeds limit of 25 MB.")
     if not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=400, detail="Invalid file type. Only valid PDF documents with %PDF- header are accepted.")
 
     fname = Path(file.filename or "uploaded.pdf").name
-    with open(UPLOADS_DIR / fname, "wb") as f:
-        f.write(content)
 
     session = session_manager.get_session()
     if not session:
@@ -448,17 +457,21 @@ async def audit_sample_endpoint(invoice_id: str):
     if not target_inv:
         raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found.")
 
-    if not session.purchase_orders and (DATA_DIR / "purchase_orders.json").exists():
-        with open(DATA_DIR / "purchase_orders.json", "r", encoding="utf-8") as f:
-            for p in json.load(f):
-                po = PurchaseOrder(**p)
-                session.purchase_orders[po.po_number] = po
+    po_csv = DATA_DIR / "purchase_orders.csv"
+    po_json = DATA_DIR / "purchase_orders.json"
+    if not session.purchase_orders:
+        if po_csv.exists():
+            session.purchase_orders = parse_purchase_orders(po_csv.read_bytes())
+        elif po_json.exists():
+            session.purchase_orders = parse_purchase_orders(po_json.read_bytes())
 
-    if not session.goods_receipts and (DATA_DIR / "goods_receipts.json").exists():
-        with open(DATA_DIR / "goods_receipts.json", "r", encoding="utf-8") as f:
-            for g in json.load(f):
-                gr = GoodsReceipt(**g)
-                session.goods_receipts[gr.po_number] = gr
+    gr_csv = DATA_DIR / "goods_receipts.csv"
+    gr_json = DATA_DIR / "goods_receipts.json"
+    if not session.goods_receipts:
+        if gr_csv.exists():
+            session.goods_receipts = parse_goods_receipts(gr_csv.read_bytes())
+        elif gr_json.exists():
+            session.goods_receipts = parse_goods_receipts(gr_json.read_bytes())
 
     if not session.contract_rag.clauses and (DATA_DIR / "contracts.json").exists():
         with open(DATA_DIR / "contracts.json", "r", encoding="utf-8") as f:
@@ -467,10 +480,6 @@ async def audit_sample_endpoint(invoice_id: str):
 
     pdf_path = DATA_DIR / "invoices" / target_inv["file"]
     content = pdf_path.read_bytes()
-
-    upload_copy = UPLOADS_DIR / target_inv["file"]
-    with open(upload_copy, "wb") as f:
-        f.write(content)
 
     await session.step_extract_invoices_parallel([(target_inv["file"], content)])
     await session.step_audit_and_ledger_process()

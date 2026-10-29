@@ -662,7 +662,7 @@
   <!-- Header -->
   <header>
     <div class="brand">
-      <div class="brand-icon">IA</div>
+      <div class="brand-icon">PA</div>
       <div>
         <div class="brand-title">Procurement Invoice & Contract Auditor</div>
         <div class="brand-subtitle">Parallel Multi-Agents · Dynamic LLM · Stateful Composite Ledger</div>
@@ -700,25 +700,26 @@
           <input type="file" id="input-invoices" accept=".pdf" multiple style="display: none;" onchange="handleFileSelected('invoices', this)">
           <div class="upload-icon">📑</div>
           <div class="upload-title">Invoice Documents (PDF)</div>
-          <div class="upload-desc">Required. Select or drag & drop one or multiple invoice PDFs.</div>
+          <div class="upload-desc">Required. Select or drag & drop up to 25 PDF invoices (max 25 MB each).</div>
           <div class="upload-status" id="status-invoices">No files selected</div>
+          <div class="upload-file-list" id="list-invoices" style="display: none; margin-top: 10px; font-size: 0.75rem; text-align: left; max-height: 80px; overflow-y: auto;"></div>
         </div>
 
-        <!-- 2. Purchase Orders -->
+        <!-- 2. Purchase Orders Table -->
         <div class="upload-card" id="card-pos" onclick="document.getElementById('input-pos').click()">
-          <input type="file" id="input-pos" accept=".json" style="display: none;" onchange="handleFileSelected('pos', this)">
+          <input type="file" id="input-pos" accept=".csv,.tsv,.json" style="display: none;" onchange="handleFileSelected('pos', this)">
           <div class="upload-icon">📋</div>
-          <div class="upload-title">Purchase Orders (JSON)</div>
-          <div class="upload-desc">Optional. Authorized ERP purchase orders with line items and contracted prices.</div>
+          <div class="upload-title">Purchase Orders Table (CSV, TSV, JSON)</div>
+          <div class="upload-desc">Optional. Tabular PO line items with quantities, prices, and addresses (max 25 MB).</div>
           <div class="upload-status" id="status-pos">No file selected</div>
         </div>
 
-        <!-- 3. Goods Receipts -->
+        <!-- 3. Good Orders / Goods Receipts Table -->
         <div class="upload-card" id="card-receipts" onclick="document.getElementById('input-receipts').click()">
-          <input type="file" id="input-receipts" accept=".json" style="display: none;" onchange="handleFileSelected('receipts', this)">
+          <input type="file" id="input-receipts" accept=".csv,.tsv,.json" style="display: none;" onchange="handleFileSelected('receipts', this)">
           <div class="upload-icon">📦</div>
-          <div class="upload-title">Warehouse Goods Receipts (JSON)</div>
-          <div class="upload-desc">Optional. Physical goods receipt proof for 3-way matching verification.</div>
+          <div class="upload-title">Good Orders & Receipts Table (CSV, TSV, JSON)</div>
+          <div class="upload-desc">Optional. Tabular warehouse receiving verification proofs for 3-way matching (max 25 MB).</div>
           <div class="upload-status" id="status-receipts">No file selected</div>
         </div>
 
@@ -727,7 +728,7 @@
           <input type="file" id="input-contracts" accept=".json,.txt" style="display: none;" onchange="handleFileSelected('contracts', this)">
           <div class="upload-icon">📜</div>
           <div class="upload-title">Contract Clauses / MSA (JSON / Text)</div>
-          <div class="upload-desc">Optional. Master terms and conditions for Vector RAG legal clause auditing.</div>
+          <div class="upload-desc">Optional. Master terms and conditions for Vector RAG legal clause auditing (max 25 MB).</div>
           <div class="upload-status" id="status-contracts">No file selected</div>
         </div>
       </div>
@@ -737,7 +738,7 @@
           <button class="btn btn-outline" id="btn-sample-pack" onclick="launchWithSamplePack()">⚡ Quick Test: Launch with Benchmark Sample Pack</button>
         </div>
         <button class="btn btn-primary" id="btn-start-workflow" onclick="startWorkflowExecution()" style="font-size: 0.95rem; padding: 10px 24px;">
-          🚀 Start Multi-Agent Audit Workflow
+          🚀 Upload & Start Multi-Agent Audit Workflow
         </button>
       </div>
 
@@ -1013,6 +1014,6 @@
 
   </section>
 
-  <script src="/app.js?v=2.5.0"></script>
+  <script src="/app.js?v=3.0.0"></script>
 </body>
 </html>

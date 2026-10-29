@@ -23,6 +23,9 @@ from typing import Any, Dict, List
 import zipfile
 import pymupdf
 
+from src.core.schema import GoodsReceipt, PurchaseOrder
+from src.core.table_parser import export_goods_receipts_to_csv, export_purchase_orders_to_csv
+
 
 def draw_invoice_pdf(
     out_path: Path,
@@ -119,8 +122,15 @@ def create_sample_zip(data_dir: Path) -> Path:
         if pdf_dir.exists():
             for pdf_file in sorted(pdf_dir.glob("*.pdf")):
                 zf.write(pdf_file, arcname=f"invoices/{pdf_file.name}")
-        # 2. Master JSON datasets
-        for fname in ["purchase_orders.json", "goods_receipts.json", "contracts.json", "manifest.json"]:
+        # 2. Master Table & Agreement datasets (Orders in CSV file format & JSON)
+        for fname in [
+            "purchase_orders.csv",
+            "purchase_orders.json",
+            "goods_receipts.csv",
+            "goods_receipts.json",
+            "contracts.json",
+            "manifest.json",
+        ]:
             fpath = data_dir / fname
             if fpath.exists():
                 zf.write(fpath, arcname=fname)
@@ -141,15 +151,16 @@ def create_sample_zip(data_dir: Path) -> Path:
             "   - INV-102_Price_Variance.pdf: Unit price drift from $600 to $750 (PO-2026-002)\n"
             "   - INV-103_Missing_Fields_HITL.pdf: Scanned / missing header fields triggering HITL\n"
             "   - INV-105_Contract_Violation_Surcharge.pdf: Banned freight fee violation (PO-2026-001)\n\n"
-            "2. purchase_orders.json:\n"
-            "   - Master authorized Purchase Orders with vendor addresses and issuance dates\n\n"
-            "3. goods_receipts.json:\n"
-            "   - Warehouse physical receipt proofs with delivery dates\n\n"
-            "4. contracts.json:\n"
-            "   - Master Service Agreement (MSA) legal clauses indexed for Vector RAG\n\n"
-            "5. ground_truth/:\n"
-            "   - Expected decisions and reason codes for deterministic benchmark validation\n\n"
-            "To audit, upload any PDF in the Cockpit or use POST /api/audit/pdf\n"
+            "2. ERP Order Documents (CSV File Format):\n"
+            "   - purchase_orders.csv:\n"
+            "     Relational table of authorized Purchase Orders with addresses and issuance dates.\n"
+            "   - goods_receipts.csv:\n"
+            "     Warehouse physical receipt proof table of good orders with verified delivery dates.\n\n"
+            "3. contracts.json:\n"
+            "   - Master Service Agreement (MSA) legal clauses indexed for Vector RAG.\n\n"
+            "4. ground_truth/:\n"
+            "   - Expected decisions and reason codes for deterministic benchmark validation.\n\n"
+            "To audit, upload files in the Web Cockpit or via POST /api/session/start\n"
         )
         zf.writestr("README.txt", readme_text)
     return zip_path
@@ -370,9 +381,18 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         with open(gt_dir / f"{sc['id']}_gt.json", "w", encoding="utf-8") as f:
             json.dump(gt_data, f, indent=2)
 
-    # Save shared datasets
+    # Save shared datasets (both tabular CSV and JSON)
+    po_objs = [PurchaseOrder(**p) for p in purchase_orders]
+    gr_objs = [GoodsReceipt(**g) for g in goods_receipts]
+
+    with open(output_dir / "purchase_orders.csv", "w", encoding="utf-8") as f:
+        f.write(export_purchase_orders_to_csv(po_objs))
+
     with open(output_dir / "purchase_orders.json", "w", encoding="utf-8") as f:
         json.dump(purchase_orders, f, indent=2)
+
+    with open(output_dir / "goods_receipts.csv", "w", encoding="utf-8") as f:
+        f.write(export_goods_receipts_to_csv(gr_objs))
 
     with open(output_dir / "goods_receipts.json", "w", encoding="utf-8") as f:
         json.dump(goods_receipts, f, indent=2)

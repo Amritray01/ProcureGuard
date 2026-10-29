@@ -31,6 +31,7 @@ from src.rag.contract_rag import ContractRAGStore
 from src.agents.graph import AuditWorkflow
 from src.extractor.pdf_extractor import PDFExtractor
 from src.synth.dataset_gen import generate_synthetic_dataset
+from src.core.table_parser import parse_contract_clauses, parse_goods_receipts, parse_purchase_orders
 
 
 class AuditSession:
@@ -265,28 +266,27 @@ class SessionManager:
                 session.status = meta.get("status", "completed")
                 session.steps = meta.get("steps", session.steps)
 
-        # Restore POs
-        po_file = session.session_dir / "purchase_orders.json"
-        if po_file.exists():
-            with open(po_file, "r", encoding="utf-8") as f:
-                for p in json.load(f):
-                    po = PurchaseOrder(**p)
-                    session.purchase_orders[po.po_number] = po
+        # Restore POs from CSV table or JSON
+        po_csv = session.session_dir / "purchase_orders.csv"
+        po_json = session.session_dir / "purchase_orders.json"
+        if po_csv.exists():
+            session.purchase_orders = parse_purchase_orders(po_csv.read_bytes())
+        elif po_json.exists():
+            session.purchase_orders = parse_purchase_orders(po_json.read_bytes())
 
-        # Restore Goods Receipts
-        gr_file = session.session_dir / "goods_receipts.json"
-        if gr_file.exists():
-            with open(gr_file, "r", encoding="utf-8") as f:
-                for g in json.load(f):
-                    gr = GoodsReceipt(**g)
-                    session.goods_receipts[gr.po_number] = gr
+        # Restore Goods Receipts from CSV table or JSON
+        gr_csv = session.session_dir / "goods_receipts.csv"
+        gr_json = session.session_dir / "goods_receipts.json"
+        if gr_csv.exists():
+            session.goods_receipts = parse_goods_receipts(gr_csv.read_bytes())
+        elif gr_json.exists():
+            session.goods_receipts = parse_goods_receipts(gr_json.read_bytes())
 
-        # Restore Contracts into session Vector RAG
+        # Restore Contracts into session Vector RAG dynamically
         c_file = session.session_dir / "contracts.json"
         if c_file.exists():
-            with open(c_file, "r", encoding="utf-8") as f:
-                for c in json.load(f):
-                    session.contract_rag.add_clause(ContractClause(**c))
+            for clause in parse_contract_clauses(c_file.read_bytes()):
+                session.contract_rag.add_clause(clause)
 
         # Restore Audit Results
         res_file = session.session_dir / "audit_results.json"
