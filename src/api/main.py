@@ -64,6 +64,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Prevent aggressive browser caching of UI code and static assets
+@app.middleware("http")
+async def add_no_cache_headers(request, call_next):
+    response = await call_next(request)
+    if request.url.path.endswith((".html", ".js", "/")) or request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
+    return response
+
 # Global Session Manager for isolated, persistent folder workspaces
 session_manager = SessionManager(data_dir=DATA_DIR)
 
@@ -117,7 +127,10 @@ async def start_session_workflow(
         sample_pdf_dir = DATA_DIR / "invoices"
         if sample_pdf_dir.exists():
             for p_file in sample_pdf_dir.glob("*.pdf"):
-                invoice_files.append((p_file.name, p_file.read_bytes()))
+                raw_bytes = p_file.read_bytes()
+                with open(UPLOADS_DIR / p_file.name, "wb") as f:
+                    f.write(raw_bytes)
+                invoice_files.append((p_file.name, raw_bytes))
 
         # POs
         with open(DATA_DIR / "purchase_orders.json", "r", encoding="utf-8") as f:
@@ -178,7 +191,11 @@ async def start_session_workflow(
                 raise HTTPException(status_code=413, detail=f"File {inv_file.filename} exceeds 15 MB limit.")
             if not content.startswith(b"%PDF-"):
                 raise HTTPException(status_code=400, detail=f"File {inv_file.filename} is not a valid PDF document.")
-            invoice_files.append((inv_file.filename or "invoice.pdf", content))
+            fname = Path(inv_file.filename or "invoice.pdf").name
+            # Save into data/uploads/
+            with open(UPLOADS_DIR / fname, "wb") as f:
+                f.write(content)
+            invoice_files.append((fname, content))
 
     if not invoice_files:
         raise HTTPException(status_code=400, detail="No invoice documents provided for auditing.")
@@ -395,20 +412,75 @@ async def audit_uploaded_pdf(file: UploadFile = File(...)):
     if not content.startswith(b"%PDF-"):
         raise HTTPException(status_code=400, detail="Invalid file type. Only valid PDF documents with %PDF- header are accepted.")
 
+    fname = Path(file.filename or "uploaded.pdf").name
+    with open(UPLOADS_DIR / fname, "wb") as f:
+        f.write(content)
+
     session = session_manager.get_session()
     if not session:
         session = session_manager.create_session()
 
-    await session.step_extract_invoices_parallel([(file.filename or "uploaded.pdf", content)])
+    await session.step_extract_invoices_parallel([(fname, content)])
     await session.step_audit_and_ledger_process()
 
-    inv_id = file.filename or "uploaded.pdf"
-    if inv_id in session.audit_results:
-        return session.audit_results[inv_id].model_dump(mode="json")
+    if fname in session.audit_results:
+        return session.audit_results[fname].model_dump(mode="json")
     for res in session.audit_results.values():
         return res.model_dump(mode="json")
 
     raise HTTPException(status_code=500, detail="Audit processing failed.")
+
+
+@app.post("/api/audit/sample/{invoice_id}")
+async def audit_sample_endpoint(invoice_id: str):
+    """Run audit on a benchmark sample invoice and return result."""
+    session = session_manager.get_session()
+    if not session:
+        session = session_manager.create_session()
+
+    manifest_file = DATA_DIR / "manifest.json"
+    if not manifest_file.exists():
+        generate_synthetic_dataset(DATA_DIR)
+    with open(manifest_file, "r", encoding="utf-8") as f:
+        manifest = json.load(f)
+
+    target_inv = next((inv for inv in manifest["invoices"] if inv["id"] == invoice_id), None)
+    if not target_inv:
+        raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found.")
+
+    if not session.purchase_orders and (DATA_DIR / "purchase_orders.json").exists():
+        with open(DATA_DIR / "purchase_orders.json", "r", encoding="utf-8") as f:
+            for p in json.load(f):
+                po = PurchaseOrder(**p)
+                session.purchase_orders[po.po_number] = po
+
+    if not session.goods_receipts and (DATA_DIR / "goods_receipts.json").exists():
+        with open(DATA_DIR / "goods_receipts.json", "r", encoding="utf-8") as f:
+            for g in json.load(f):
+                gr = GoodsReceipt(**g)
+                session.goods_receipts[gr.po_number] = gr
+
+    if not session.contract_rag.clauses and (DATA_DIR / "contracts.json").exists():
+        with open(DATA_DIR / "contracts.json", "r", encoding="utf-8") as f:
+            for c in json.load(f):
+                session.contract_rag.add_clause(ContractClause(**c))
+
+    pdf_path = DATA_DIR / "invoices" / target_inv["file"]
+    content = pdf_path.read_bytes()
+
+    upload_copy = UPLOADS_DIR / target_inv["file"]
+    with open(upload_copy, "wb") as f:
+        f.write(content)
+
+    await session.step_extract_invoices_parallel([(target_inv["file"], content)])
+    await session.step_audit_and_ledger_process()
+
+    res = session.audit_results.get(invoice_id)
+    if res:
+        return res.model_dump(mode="json")
+    for r in session.audit_results.values():
+        return r.model_dump(mode="json")
+    raise HTTPException(status_code=500, detail="Audit failed.")
 
 
 # Mount static directory for frontend

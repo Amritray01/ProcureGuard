@@ -102,8 +102,12 @@ function handleFileSelected(type, input) {
   if (type === "invoices") {
     stagedFiles.invoices = Array.from(input.files);
     if (stagedFiles.invoices.length > 0) {
-      status.textContent = `${stagedFiles.invoices.length} PDF(s) selected: ` + stagedFiles.invoices.map(f => f.name).join(", ");
+      status.textContent = `✓ Selected ${stagedFiles.invoices.length} invoice(s). Uploading & starting audit workflow...`;
       card.classList.add("has-file");
+      // Immediate auto-launch so nothing is stalled
+      setTimeout(() => {
+        startWorkflowExecution();
+      }, 400);
     } else {
       status.textContent = "No files selected";
       card.classList.remove("has-file");
@@ -112,7 +116,7 @@ function handleFileSelected(type, input) {
     const file = input.files[0];
     stagedFiles[type] = file || null;
     if (file) {
-      status.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      status.textContent = `✓ Loaded: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
       card.classList.add("has-file");
     } else {
       status.textContent = "No file selected";
