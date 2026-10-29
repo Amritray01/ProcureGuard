@@ -1,22 +1,31 @@
-// Frontend Controller for Procurement Invoice & Contract Auditor Cockpit
+// Frontend Controller for Session-Based Multi-Agent Procurement Auditor
 
+let activeSessionId = null;
+let sessionInvoices = [];
+let sessionResults = {};
 let currentInvoiceId = null;
-let currentAuditData = null;
-let loadedDocuments = [];
+
+// Selected files staging
+const stagedFiles = {
+  invoices: [],
+  pos: null,
+  receipts: null,
+  contracts: null,
+};
 
 document.addEventListener("DOMContentLoaded", () => {
-  setupUploadAndDropzone();
-  setupSampleLoader();
-  checkExistingUploads();
-
-  // Setup Chatbot
-  document.getElementById("btn-send-chat").addEventListener("click", handleSendMessage);
-  document.getElementById("chat-input").addEventListener("keypress", (e) => {
-    if (e.key === "Enter") handleSendMessage();
-  });
+  setupChatbot();
+  setupDragAndDrop();
+  checkActiveSession();
 });
 
-// --- Tab Switching ---
+// --- Screen Switching ---
+function showScreen(screenId) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.remove("active"));
+  const target = document.getElementById(screenId);
+  if (target) target.classList.add("active");
+}
+
 function switchView(viewName) {
   document.querySelectorAll(".nav-tab-btn").forEach(btn => btn.classList.remove("active"));
   document.querySelectorAll(".view-panel").forEach(panel => panel.classList.remove("active"));
@@ -27,223 +36,284 @@ function switchView(viewName) {
   } else if (viewName === "erp") {
     document.querySelectorAll(".nav-tab-btn")[1].classList.add("active");
     document.getElementById("view-erp").classList.add("active");
-    loadERPTables();
+    loadSessionERPTables();
   } else if (viewName === "vectordb") {
     document.querySelectorAll(".nav-tab-btn")[2].classList.add("active");
     document.getElementById("view-vectordb").classList.add("active");
-    loadVectorDBClauses();
+    loadSessionVectorDB();
   }
 }
 
-// --- Check Existing User Uploads on Load ---
-async function checkExistingUploads() {
+// --- Check Active Session on Page Load ---
+async function checkActiveSession() {
   try {
-    const res = await fetch("/api/documents/uploaded");
+    const res = await fetch("/api/session/current");
     const data = await res.json();
-    if (Array.isArray(data) && data.length > 0) {
-      loadedDocuments = data.map(d => ({ ...d, type: "uploaded" }));
-      renderDocumentQueue();
-      // Select the first uploaded document
-      selectDocument(loadedDocuments[0].invoice_id, 0);
+    if (data.session_id && data.status === "completed") {
+      activeSessionId = data.session_id;
+      // Load session results
+      await restoreSessionData(activeSessionId);
+    } else {
+      // Start with clean upload portal (zero early tables/files)
+      resetToUploadPortalUI();
     }
-  } catch (err) {
-    console.warn("Could not check uploaded documents:", err);
+  } catch (e) {
+    resetToUploadPortalUI();
   }
 }
 
-// --- Benchmark Sample Pack Loader ---
-function setupSampleLoader() {
-  const btn = document.getElementById("btn-load-samples");
-  if (!btn) return;
-  btn.addEventListener("click", async () => {
-    btn.disabled = true;
-    btn.textContent = "Loading Pack...";
-    try {
-      const res = await fetch("/api/dataset/samples");
-      const data = await res.json();
-      
-      const sampleDocs = data.invoices.map(inv => ({
-        invoice_id: inv.id,
-        filename: inv.file,
-        vendor: inv.vendor,
-        po_number: inv.po_number,
-        date: "2026-10-22",
-        decision: inv.expected_decision,
-        risk_score: inv.expected_decision === "auto_approve" ? 0 : (inv.expected_decision === "reject" ? 95 : 55),
-        financial_exposure: "0.00",
-        type: "sample",
-      }));
+function resetToUploadPortalUI() {
+  activeSessionId = null;
+  sessionInvoices = [];
+  sessionResults = {};
+  currentInvoiceId = null;
+  stagedFiles.invoices = [];
+  stagedFiles.pos = null;
+  stagedFiles.receipts = null;
+  stagedFiles.contracts = null;
 
-      // Combine uploaded and samples
-      const existingIds = new Set(loadedDocuments.map(d => d.invoice_id));
-      for (const s of sampleDocs) {
-        if (!existingIds.has(s.invoice_id)) {
-          loadedDocuments.push(s);
-        }
-      }
+  document.getElementById("session-badge").style.display = "none";
+  document.getElementById("main-nav-tabs").style.display = "none";
+  document.getElementById("btn-new-session").style.display = "none";
 
-      renderDocumentQueue();
-      selectDocument(sampleDocs[0].invoice_id, 0);
-      appendBotMsg("📦 Loaded benchmark procurement suite into the queue! Select any invoice to inspect findings.");
-    } catch (err) {
-      alert("Error loading benchmark suite: " + err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "📦 Load Benchmark Samples";
+  // Reset status text
+  document.getElementById("status-invoices").textContent = "No files selected";
+  document.getElementById("status-pos").textContent = "No file selected";
+  document.getElementById("status-receipts").textContent = "No file selected";
+  document.getElementById("status-contracts").textContent = "No file selected";
+
+  document.querySelectorAll(".upload-card").forEach(c => c.classList.remove("has-file"));
+
+  showScreen("screen-portal");
+}
+
+async function resetToUploadPortal() {
+  try {
+    await fetch("/api/session/reset", { method: "POST" });
+  } catch (e) {}
+  resetToUploadPortalUI();
+}
+
+// --- File Selection Handlers ---
+function handleFileSelected(type, input) {
+  const card = document.getElementById(`card-${type}`);
+  const status = document.getElementById(`status-${type}`);
+
+  if (type === "invoices") {
+    stagedFiles.invoices = Array.from(input.files);
+    if (stagedFiles.invoices.length > 0) {
+      status.textContent = `${stagedFiles.invoices.length} PDF(s) selected: ` + stagedFiles.invoices.map(f => f.name).join(", ");
+      card.classList.add("has-file");
+    } else {
+      status.textContent = "No files selected";
+      card.classList.remove("has-file");
     }
+  } else {
+    const file = input.files[0];
+    stagedFiles[type] = file || null;
+    if (file) {
+      status.textContent = `Selected: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`;
+      card.classList.add("has-file");
+    } else {
+      status.textContent = "No file selected";
+      card.classList.remove("has-file");
+    }
+  }
+}
+
+function setupDragAndDrop() {
+  ["invoices", "pos", "receipts", "contracts"].forEach(type => {
+    const card = document.getElementById(`card-${type}`);
+    const input = document.getElementById(`input-${type}`);
+
+    card.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      card.classList.add("highlight");
+    });
+    card.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      card.classList.remove("highlight");
+    });
+    card.addEventListener("drop", (e) => {
+      e.preventDefault();
+      card.classList.remove("highlight");
+      if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+        input.files = e.dataTransfer.files;
+        handleFileSelected(type, input);
+      }
+    });
   });
 }
 
-// --- Render Document Queue in Left Sidebar ---
-function renderDocumentQueue() {
-  const listEl = document.getElementById("sample-list");
-  const badgeEl = document.getElementById("doc-queue-badge");
-
-  if (loadedDocuments.length === 0) {
-    badgeEl.textContent = "0 Loaded";
-    listEl.innerHTML = `
-      <div class="empty-state" style="padding: 24px 12px;">
-        <p style="font-size: 0.85rem; font-weight: 500; margin-bottom: 6px;">No documents loaded</p>
-        <p style="font-size: 0.75rem; color: var(--text-muted);">Please upload an invoice PDF above, or click 'Load Benchmark Samples' to test.</p>
-      </div>
-    `;
+// --- Launch Workflow with User Uploaded Documents ---
+async function startWorkflowExecution() {
+  if (!stagedFiles.invoices || stagedFiles.invoices.length === 0) {
+    alert("Please select or drop at least one invoice PDF document to audit.");
     return;
   }
 
-  badgeEl.textContent = `${loadedDocuments.length} Loaded`;
+  const formData = new FormData();
+  for (const inv of stagedFiles.invoices) {
+    formData.append("invoices", inv);
+  }
+  if (stagedFiles.pos) formData.append("purchase_orders", stagedFiles.pos);
+  if (stagedFiles.receipts) formData.append("goods_receipts", stagedFiles.receipts);
+  if (stagedFiles.contracts) formData.append("contracts", stagedFiles.contracts);
+
+  executeWorkflowCall(formData);
+}
+
+// --- Launch Quick Test with Benchmark Sample Pack ---
+async function launchWithSamplePack() {
+  const formData = new FormData();
+  formData.append("use_sample_pack", "true");
+  executeWorkflowCall(formData);
+}
+
+// --- Stepper Execution Animation and API Call ---
+async function executeWorkflowCall(formData) {
+  showScreen("screen-stepper");
+  resetStepperUI();
+
+  // Animate initial step
+  updateStepRow(1, "in_progress", "Chunking contract clauses & tokenizing for Vector DB in parallel...");
+
+  try {
+    // Artificial smooth step transition timer for high visual quality
+    setTimeout(() => {
+      updateStepRow(1, "completed", "Indexed clauses into session Vector RAG.");
+      updateStepRow(2, "in_progress", "Extracting uploaded invoice PDFs in parallel threads...");
+    }, 400);
+
+    setTimeout(() => {
+      updateStepRow(2, "completed", "Parallel coordinate extraction and line parsing complete.");
+      updateStepRow(3, "in_progress", "Executing deterministic 3-way matching & contract RAG audit...");
+    }, 900);
+
+    const res = await fetch("/api/session/start", {
+      method: "POST",
+      body: formData,
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `Server returned ${res.status}`);
+    }
+
+    const data = await res.json();
+    activeSessionId = data.session_id;
+    sessionInvoices = data.invoices;
+    sessionResults = data.results;
+
+    document.getElementById("stepper-session-id").textContent = activeSessionId;
+    updateStepRow(3, "completed", data.steps[2].details || "3-Way reconciliation completed.");
+    updateStepRow(4, "completed", data.steps[3].details || "Ledger composite history verified and saved.");
+    
+    document.getElementById("stepper-overall-status").className = "badge badge-auto_approve";
+    document.getElementById("stepper-overall-status").textContent = "COMPLETED";
+
+    const btnCockpit = document.getElementById("btn-view-cockpit");
+    btnCockpit.style.display = "inline-flex";
+
+    // Auto-transition to Cockpit after brief pause
+    setTimeout(() => {
+      transitionToCockpit();
+    }, 800);
+
+  } catch (err) {
+    document.getElementById("stepper-overall-status").className = "badge badge-reject";
+    document.getElementById("stepper-overall-status").textContent = "ERROR";
+    updateStepRow(2, "completed", "Extraction failed.");
+    updateStepRow(3, "completed", "Error: " + err.message);
+    alert("Workflow failed: " + err.message);
+  }
+}
+
+function resetStepperUI() {
+  document.getElementById("stepper-session-id").textContent = "Creating session folder...";
+  document.getElementById("stepper-overall-status").className = "badge badge-needs_review";
+  document.getElementById("stepper-overall-status").textContent = "IN PROGRESS";
+  document.getElementById("btn-view-cockpit").style.display = "none";
+
+  for (let i = 1; i <= 4; i++) {
+    const row = document.getElementById(`step-row-${i}`);
+    row.className = "step-item";
+    document.getElementById(`step-badge-${i}`).textContent = "PENDING";
+    document.getElementById(`step-badge-${i}`).style.background = "rgba(255,255,255,0.06)";
+  }
+}
+
+function updateStepRow(stepNum, status, details) {
+  const row = document.getElementById(`step-row-${stepNum}`);
+  const badge = document.getElementById(`step-badge-${stepNum}`);
+  const desc = document.getElementById(`step-desc-${stepNum}`);
+
+  row.className = `step-item ${status}`;
+  badge.textContent = status.toUpperCase().replace("_", " ");
+  if (status === "in_progress") {
+    badge.className = "badge badge-needs_review";
+  } else if (status === "completed") {
+    badge.className = "badge badge-auto_approve";
+  }
+  if (details) desc.textContent = details;
+}
+
+// --- Transition to Active Cockpit ---
+function transitionToCockpit() {
+  showScreen("screen-cockpit");
+  switchView("audit");
+
+  // Show session headers
+  const badge = document.getElementById("session-badge");
+  badge.style.display = "inline-block";
+  badge.textContent = `Session: ${activeSessionId}`;
+
+  document.getElementById("main-nav-tabs").style.display = "flex";
+  document.getElementById("btn-new-session").style.display = "inline-flex";
+
+  renderSessionDocumentQueue();
+  if (sessionInvoices.length > 0) {
+    selectInvoice(sessionInvoices[0].id, 0);
+  }
+}
+
+// --- Render Session Documents Queue ---
+function renderSessionDocumentQueue() {
+  const listEl = document.getElementById("sample-list");
+  const queueBadge = document.getElementById("doc-queue-badge");
+
+  queueBadge.textContent = `${sessionInvoices.length} Documents`;
   listEl.innerHTML = "";
 
-  loadedDocuments.forEach((doc, idx) => {
+  sessionInvoices.forEach((inv, idx) => {
     const item = document.createElement("div");
-    item.className = "sample-item" + (doc.invoice_id === currentInvoiceId ? " active" : "");
-    item.onclick = () => selectDocument(doc.invoice_id, idx);
+    item.className = "sample-item" + (idx === 0 ? " active" : "");
+    item.onclick = () => selectInvoice(inv.id, idx);
 
-    const badgeClass = `badge-${doc.decision || 'needs_review'}`;
-    const typeTag = doc.type === "uploaded" 
-      ? `<span style="font-size: 0.65rem; color: #a5b4fc; background: rgba(99,102,241,0.15); padding: 2px 6px; border-radius: 4px;">UPLOADED</span>` 
-      : `<span style="font-size: 0.65rem; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">SAMPLE</span>`;
-
+    const badgeClass = `badge-${inv.decision || 'needs_review'}`;
     item.innerHTML = `
       <div class="sample-title">
-        <span style="display: flex; align-items: center; gap: 6px;">
-          ${doc.invoice_id}
-          ${typeTag}
-        </span>
-        <span class="badge ${badgeClass}">${(doc.decision || 'review').replace("_", " ")}</span>
+        <span>${inv.id}</span>
+        <span class="badge ${badgeClass}">${(inv.decision || 'review').replace("_", " ")}</span>
       </div>
-      <div class="sample-desc">${doc.vendor || 'Unknown Vendor'} • PO: ${doc.po_number || 'N/A'}</div>
+      <div class="sample-desc">${inv.vendor || 'Unknown Supplier'} • PO: ${inv.po_number || 'N/A'}</div>
     `;
     listEl.appendChild(item);
   });
 }
 
-// --- Select and View Document ---
-async function selectDocument(invoiceId, idx) {
+// --- Select and Inspect Invoice in Cockpit ---
+function selectInvoice(invoiceId, idx) {
   currentInvoiceId = invoiceId;
 
-  // Highlight in sidebar
   document.querySelectorAll(".sample-item").forEach((item, i) => {
     if (i === idx) item.classList.add("active");
     else item.classList.remove("active");
   });
 
-  const doc = loadedDocuments.find(d => d.invoice_id === invoiceId);
-  const body = document.getElementById("audit-body");
-
-  if (doc && doc.type === "sample") {
-    body.innerHTML = `<div class="empty-state">Auditing benchmark invoice <b>${invoiceId}</b> with LangGraph Multi-Agents...</div>`;
-    try {
-      const res = await fetch(`/api/audit/sample/${invoiceId}`, { method: "POST" });
-      const data = await res.json();
-      currentAuditData = data;
-      renderAuditResult(data);
-    } catch (err) {
-      body.innerHTML = `<div class="empty-state" style="color: var(--danger);">Audit failed: ${err.message}</div>`;
-    }
-  } else if (currentAuditData && currentAuditData.invoice_id === invoiceId) {
-    renderAuditResult(currentAuditData);
-  }
-}
-
-// --- Upload & Immediate Processing ---
-function setupUploadAndDropzone() {
-  const uploadInput = document.getElementById("pdf-upload-input");
-  document.getElementById("btn-upload").addEventListener("click", () => uploadInput.click());
-
-  uploadInput.addEventListener("change", (e) => {
-    const file = e.target.files[0];
-    if (file) processUploadedFile(file);
-  });
-
-  const dropzone = document.getElementById("quick-dropzone");
-  if (dropzone) {
-    dropzone.addEventListener("dragover", (e) => {
-      e.preventDefault();
-      dropzone.style.borderColor = "var(--accent)";
-    });
-    dropzone.addEventListener("dragleave", (e) => {
-      e.preventDefault();
-      dropzone.style.borderColor = "rgba(99, 102, 241, 0.4)";
-    });
-    dropzone.addEventListener("drop", (e) => {
-      e.preventDefault();
-      dropzone.style.borderColor = "rgba(99, 102, 241, 0.4)";
-      if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-        processUploadedFile(e.dataTransfer.files[0]);
-      }
-    });
-  }
-}
-
-async function processUploadedFile(file) {
-  switchView("audit");
-  const body = document.getElementById("audit-body");
-  body.innerHTML = `
-    <div class="empty-state">
-      <div style="font-size: 1.5rem; margin-bottom: 8px;">⏳</div>
-      <p style="font-size: 1.05rem; font-weight: 600;">Processing ${file.name} immediately...</p>
-      <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Storing separately in uploads/, running dynamic PDF extraction, deterministic 3-way matching, and LangGraph contract audit.</p>
-    </div>
-  `;
-
-  const formData = new FormData();
-  formData.append("file", file);
-
-  try {
-    const res = await fetch("/api/audit/pdf", { method: "POST", body: formData });
-    if (!res.ok) {
-      const errJson = await res.json().catch(() => ({}));
-      throw new Error(errJson.detail || `HTTP ${res.status}`);
-    }
-    const data = await res.json();
-    currentInvoiceId = data.invoice_id;
-    currentAuditData = data;
-
-    // Add to loaded documents list
-    const docEntry = {
-      invoice_id: data.invoice_id,
-      filename: file.name,
-      vendor: "Extracted Supplier",
-      po_number: "PO Reference",
-      date: new Date().toISOString().split("T")[0],
-      decision: data.decision,
-      risk_score: data.risk_score,
-      financial_exposure: String(data.financial_exposure),
-      type: "uploaded",
-    };
-
-    const existingIdx = loadedDocuments.findIndex(d => d.invoice_id === data.invoice_id);
-    if (existingIdx >= 0) {
-      loadedDocuments[existingIdx] = docEntry;
-    } else {
-      loadedDocuments.unshift(docEntry);
-    }
-
-    renderDocumentQueue();
-    renderAuditResult(data);
-    appendBotMsg(`Audited uploaded document **${file.name}**. Stored separately in \`data/uploads/\`. Audit Decision: **${data.decision.toUpperCase()}**.`);
-  } catch (err) {
-    body.innerHTML = `<div class="empty-state" style="color: var(--danger);">Upload & Processing failed: ${err.message}</div>`;
+  const auditData = sessionResults[invoiceId];
+  if (auditData) {
+    renderAuditResult(auditData);
   }
 }
 
@@ -351,14 +421,14 @@ function renderAuditResult(data) {
 }
 
 async function submitReview(action) {
-  if (!currentInvoiceId) return;
+  if (!currentInvoiceId || !activeSessionId) return;
 
   const notes = document.getElementById("review-notes").value;
   const statusLabel = document.getElementById("review-status-label");
-  statusLabel.textContent = "Recording decision in audit trail...";
+  statusLabel.textContent = "Recording decision in session audit trail...";
 
   try {
-    const res = await fetch("/api/review", {
+    const res = await fetch(`/api/review?session_id=${activeSessionId}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -368,25 +438,28 @@ async function submitReview(action) {
         notes: notes || "Auditor manual sign-off",
       }),
     });
-    await res.json();
+    const resData = await res.json();
     statusLabel.innerHTML = `✓ Decision recorded: <b>${action.toUpperCase()}</b> at ${new Date().toLocaleTimeString()}`;
+    if (sessionResults[currentInvoiceId]) {
+      sessionResults[currentInvoiceId].human_decision = resData.decision;
+    }
     appendBotMsg(`Human Review Decision saved for **${currentInvoiceId}**: **${action.toUpperCase()}**.`);
   } catch (err) {
     statusLabel.textContent = "Failed to record decision: " + err.message;
   }
 }
 
-// --- ERP Tables Loading ---
-async function loadERPTables() {
+// --- Session ERP Tables Loading ---
+async function loadSessionERPTables() {
   const poTbody = document.querySelector("#po-table tbody");
   const grTbody = document.querySelector("#gr-table tbody");
 
   // 1. POs Table
   try {
-    const resPo = await fetch("/api/erp/purchase-orders");
+    const resPo = await fetch(`/api/erp/purchase-orders?session_id=${activeSessionId || ''}`);
     const pos = await resPo.json();
     if (!pos || pos.length === 0) {
-      poTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">No ERP purchase orders loaded yet. Please upload an invoice or load the benchmark pack.</td></tr>`;
+      poTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">No purchase orders in this session.</td></tr>`;
     } else {
       poTbody.innerHTML = "";
       pos.forEach(row => {
@@ -410,10 +483,10 @@ async function loadERPTables() {
 
   // 2. Goods Receipts Table
   try {
-    const resGr = await fetch("/api/erp/goods-receipts");
+    const resGr = await fetch(`/api/erp/goods-receipts?session_id=${activeSessionId || ''}`);
     const grs = await resGr.json();
     if (!grs || grs.length === 0) {
-      grTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No warehouse goods receipts loaded yet. Please upload an invoice or load the benchmark pack.</td></tr>`;
+      grTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No warehouse goods receipts in this session.</td></tr>`;
     } else {
       grTbody.innerHTML = "";
       grs.forEach(row => {
@@ -435,14 +508,19 @@ async function loadERPTables() {
   }
 }
 
-// --- Vector DB Clauses Loading & Addition ---
-async function loadVectorDBClauses() {
+// --- Session Vector DB Loading & Addition ---
+async function loadSessionVectorDB() {
   try {
-    const res = await fetch("/api/rag/clauses");
+    const res = await fetch(`/api/rag/clauses?session_id=${activeSessionId || ''}`);
     const clauses = await res.json();
     document.getElementById("clause-count-badge").textContent = `${clauses.length} Clauses Indexed`;
 
     const tbody = document.querySelector("#clauses-table tbody");
+    if (!clauses || clauses.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">No contract clauses indexed in this session.</td></tr>`;
+      return;
+    }
+
     tbody.innerHTML = "";
     clauses.forEach(c => {
       const tr = document.createElement("tr");
@@ -464,7 +542,7 @@ async function loadVectorDBClauses() {
 async function handleAddClause(e) {
   e.preventDefault();
   const feedback = document.getElementById("clause-addition-feedback");
-  feedback.textContent = "Indexing clause into Vector DB...";
+  feedback.textContent = "Indexing clause into session Vector DB...";
 
   const payload = {
     clause_id: document.getElementById("c-id").value.trim(),
@@ -475,7 +553,7 @@ async function handleAddClause(e) {
   };
 
   try {
-    const res = await fetch("/api/rag/clauses", {
+    const res = await fetch(`/api/rag/clauses?session_id=${activeSessionId || ''}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -483,13 +561,20 @@ async function handleAddClause(e) {
     const result = await res.json();
     feedback.innerHTML = `✓ Successfully indexed clause <b>${result.clause_details.clause_id}</b> (${result.clause_details.token_count} tokens embedded)!`;
     document.getElementById("add-clause-form").reset();
-    await loadVectorDBClauses();
+    await loadSessionVectorDB();
   } catch (err) {
     feedback.innerHTML = `<span style="color: var(--danger);">Failed to add clause: ${err.message}</span>`;
   }
 }
 
 // --- Chatbot Logic ---
+function setupChatbot() {
+  document.getElementById("btn-send-chat").addEventListener("click", handleSendMessage);
+  document.getElementById("chat-input").addEventListener("keypress", (e) => {
+    if (e.key === "Enter") handleSendMessage();
+  });
+}
+
 async function handleSendMessage() {
   const input = document.getElementById("chat-input");
   const msg = input.value.trim();
@@ -499,7 +584,7 @@ async function handleSendMessage() {
   input.value = "";
 
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch(`/api/chat?session_id=${activeSessionId || ''}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

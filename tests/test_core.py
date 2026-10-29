@@ -393,3 +393,78 @@ def test_sample_pack_zip_download_and_proper_dates(tmp_path):
     assert res.status_code == 200
     assert res.headers["content-type"] in ("application/zip", "application/x-zip-compressed")
 
+
+def test_session_starts_completely_clean_without_preloaded_data():
+    """Verify that ERP tables and clauses start completely empty before any document is uploaded."""
+    from src.api.main import session_manager
+    session_manager.current_session_id = None
+    client = TestClient(app)
+
+    # 1. Purchase orders must be empty
+    res_pos = client.get("/api/erp/purchase-orders")
+    assert res_pos.status_code == 200
+    assert res_pos.json() == []
+
+    # 2. Goods receipts must be empty
+    res_grs = client.get("/api/erp/goods-receipts")
+    assert res_grs.status_code == 200
+    assert res_grs.json() == []
+
+    # 3. Vector DB clauses must be empty
+    res_clauses = client.get("/api/rag/clauses")
+    assert res_clauses.status_code == 200
+    assert res_clauses.json() == []
+
+
+def test_session_folder_persistence_and_parallel_workflow(tmp_path):
+    """Verify session creation in data/sessions/{session_id}/ and parallel 4-step workflow."""
+    from src.core.session_manager import SessionManager
+    import pymupdf
+
+    sess_mgr = SessionManager(data_dir=tmp_path)
+    session = sess_mgr.create_session("sess_test_123")
+    assert (tmp_path / "sessions" / "sess_test_123").exists()
+
+    # Create dummy PDF bytes
+    doc = pymupdf.open()
+    page = doc.new_page()
+    page.insert_text((50, 50), "COMMERCIAL INVOICE\nVendor: Apex Industrial Supply\nInvoice #: INV-SESS-1\nPO Number: PO-SESS-1\nDate: 2026-10-22\nTotal Due: $500.00")
+    page.insert_text((50, 150), "Line Description Qty Unit Price Total\n1 Precision Valve 10.0 $50.00 $500.00")
+    pdf_bytes = doc.tobytes()
+    doc.close()
+
+    # Step 1: Chunk contracts
+    contracts_mock = [{
+        "clause_id": "MSA-TEST-1",
+        "vendor": "Apex Industrial Supply",
+        "title": "Delivery Terms",
+        "content": "All orders include delivery fees.",
+        "category": "fees",
+        "prohibits_surcharges": True,
+    }]
+    import asyncio
+    asyncio.run(session.step_chunk_contracts_parallel(contracts_mock))
+    assert len(session.contract_rag.clauses) == 1
+    assert session.steps[0]["status"] == "completed"
+
+    # Step 2: Extract PDF in parallel
+    asyncio.run(session.step_extract_invoices_parallel([("INV-SESS-1.pdf", pdf_bytes)]))
+    assert len(session.invoices) == 1
+    assert session.steps[1]["status"] == "completed"
+
+    # Add matching PO
+    session.purchase_orders["PO-SESS-1"] = PurchaseOrder(
+        po_number="PO-SESS-1",
+        vendor="Apex Industrial Supply",
+        receipt_required=False,
+        lines=[POLine(line_number=1, description="Precision Valve", quantity=Decimal("10.0"), unit_price=Decimal("50.00"))],
+    )
+
+    # Step 3 & 4: Multi-Agent Audit and Cumulative Ledger
+    asyncio.run(session.step_audit_and_ledger_process())
+    assert session.status == "completed"
+    assert "INV-SESS-1" in session.audit_results
+    assert (tmp_path / "sessions" / "sess_test_123" / "audit_results.json").exists()
+    assert (tmp_path / "sessions" / "sess_test_123" / "session_metadata.json").exists()
+
+

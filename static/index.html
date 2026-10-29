@@ -40,7 +40,7 @@
 
     /* Header */
     header {
-      background: rgba(11, 15, 25, 0.85);
+      background: rgba(11, 15, 25, 0.9);
       backdrop-filter: blur(16px);
       border-bottom: 1px solid var(--card-border);
       padding: 14px 28px;
@@ -57,15 +57,15 @@
       gap: 12px;
     }
     .brand-icon {
-      width: 36px;
-      height: 36px;
+      width: 38px;
+      height: 38px;
       background: linear-gradient(135deg, var(--primary), var(--accent));
-      border-radius: 8px;
+      border-radius: 9px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-weight: 700;
-      box-shadow: 0 0 15px var(--primary-glow);
+      box-shadow: 0 0 16px var(--primary-glow);
     }
     .brand-title {
       font-size: 1.15rem;
@@ -73,7 +73,7 @@
       letter-spacing: -0.02em;
     }
     .brand-subtitle {
-      font-size: 0.75rem;
+      font-size: 0.72rem;
       color: var(--accent);
       font-family: 'JetBrains Mono', monospace;
     }
@@ -82,8 +82,18 @@
       align-items: center;
       gap: 12px;
     }
+    .session-badge {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.74rem;
+      padding: 4px 10px;
+      background: rgba(99, 102, 241, 0.15);
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      border-radius: 6px;
+      color: #a5b4fc;
+      display: none;
+    }
     .nav-tabs {
-      display: flex;
+      display: none;
       background: rgba(255, 255, 255, 0.04);
       padding: 4px;
       border-radius: 10px;
@@ -117,6 +127,7 @@
       align-items: center;
       gap: 8px;
       font-family: inherit;
+      text-decoration: none;
     }
     .btn-primary {
       background: var(--primary);
@@ -136,7 +147,191 @@
       background: rgba(255, 255, 255, 0.1);
     }
 
-    /* Main Grid */
+    /* Screen containers */
+    .screen {
+      display: none;
+      width: 100%;
+      flex: 1;
+    }
+    .screen.active {
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ONBOARDING UPLOAD PORTAL (Screen 1) */
+    .portal-container {
+      max-width: 1080px;
+      margin: 36px auto;
+      padding: 0 24px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+    }
+    .portal-hero {
+      text-align: center;
+    }
+    .portal-hero h1 {
+      font-size: 1.85rem;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #ffffff 40%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .portal-hero p {
+      font-size: 0.92rem;
+      color: var(--text-muted);
+      max-width: 640px;
+      margin: 0 auto;
+      line-height: 1.5;
+    }
+
+    .upload-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+    .upload-card {
+      background: var(--card-bg);
+      border: 1px dashed rgba(255, 255, 255, 0.15);
+      border-radius: var(--border-radius);
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+    }
+    .upload-card:hover {
+      border-color: var(--primary-light);
+      background: var(--card-hover);
+      transform: translateY(-2px);
+    }
+    .upload-card.highlight {
+      border-color: var(--accent);
+      background: rgba(6, 182, 212, 0.08);
+    }
+    .upload-card.has-file {
+      border-style: solid;
+      border-color: var(--success);
+      background: rgba(16, 185, 129, 0.05);
+    }
+    .upload-icon {
+      font-size: 2.2rem;
+      margin-bottom: 12px;
+    }
+    .upload-title {
+      font-size: 0.98rem;
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+    .upload-desc {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+    .upload-status {
+      font-size: 0.75rem;
+      color: var(--accent);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    .portal-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--border-radius);
+      padding: 20px 24px;
+    }
+    .portal-quick-test {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    /* WORKFLOW STEPPER SCREEN (Screen 2) */
+    .stepper-container {
+      max-width: 820px;
+      margin: 40px auto;
+      padding: 0 24px;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+    .stepper-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--border-radius);
+      padding: 30px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+    }
+    .step-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--card-border);
+      transition: var(--transition);
+    }
+    .step-item.in_progress {
+      border-color: var(--primary);
+      background: rgba(99, 102, 241, 0.08);
+    }
+    .step-item.completed {
+      border-color: var(--success);
+      background: rgba(16, 185, 129, 0.05);
+    }
+    .step-icon {
+      width: 38px;
+      height: 38px;
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      flex-shrink: 0;
+    }
+    .step-item.in_progress .step-icon {
+      background: var(--primary);
+      box-shadow: 0 0 12px var(--primary-glow);
+    }
+    .step-item.completed .step-icon {
+      background: var(--success);
+      color: white;
+    }
+    .step-content {
+      flex: 1;
+    }
+    .step-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .step-title {
+      font-weight: 600;
+      font-size: 0.92rem;
+    }
+    .step-desc {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* AUDIT COCKPIT (Screen 3) */
     .dashboard-container {
       display: grid;
       grid-template-columns: 310px 1fr 360px;
@@ -147,8 +342,6 @@
       margin: 0 auto;
       width: 100%;
     }
-
-    /* View containers */
     .view-panel {
       display: none;
       width: 100%;
@@ -156,8 +349,6 @@
     .view-panel.active {
       display: contents;
     }
-
-    /* Full width ERP view container */
     .full-width-container {
       grid-column: 1 / -1;
       display: flex;
@@ -165,7 +356,6 @@
       gap: 20px;
     }
 
-    /* Cards */
     .card {
       background: var(--card-bg);
       border: 1px solid var(--card-border);
@@ -192,7 +382,6 @@
       gap: 8px;
     }
 
-    /* Sample Invoice List */
     .sample-list {
       padding: 14px;
       overflow-y: auto;
@@ -239,7 +428,6 @@
     .badge-needs_review { background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); }
     .badge-reject { background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); }
 
-    /* Center Audit Inspector */
     .audit-body {
       padding: 20px;
       overflow-y: auto;
@@ -273,7 +461,6 @@
       font-weight: 700;
     }
 
-    /* Human in Loop Alert Box */
     .hitl-banner {
       background: linear-gradient(135deg, rgba(245, 158, 11, 0.12), rgba(239, 68, 68, 0.08));
       border: 1px solid rgba(245, 158, 11, 0.35);
@@ -283,23 +470,10 @@
       align-items: flex-start;
       gap: 14px;
     }
-    .hitl-icon {
-      font-size: 1.5rem;
-      line-height: 1;
-    }
-    .hitl-content h4 {
-      font-size: 0.88rem;
-      color: #fbbf24;
-      margin-bottom: 4px;
-      font-weight: 600;
-    }
-    .hitl-content p {
-      font-size: 0.8rem;
-      color: #e2e8f0;
-      line-height: 1.4;
-    }
+    .hitl-icon { font-size: 1.5rem; line-height: 1; }
+    .hitl-content h4 { font-size: 0.88rem; color: #fbbf24; margin-bottom: 4px; font-weight: 600; }
+    .hitl-content p { font-size: 0.8rem; color: #e2e8f0; line-height: 1.4; }
 
-    /* Section Headers */
     .section-title {
       font-size: 0.85rem;
       text-transform: uppercase;
@@ -310,8 +484,6 @@
       align-items: center;
       gap: 6px;
     }
-
-    /* Reason List */
     .reason-item {
       background: rgba(255, 255, 255, 0.02);
       border: 1px solid var(--card-border);
@@ -332,7 +504,6 @@
       display: inline-block;
     }
 
-    /* Evidence Box */
     .evidence-item {
       background: rgba(6, 182, 212, 0.04);
       border: 1px solid rgba(6, 182, 212, 0.2);
@@ -348,7 +519,6 @@
       font-size: 0.78rem;
     }
 
-    /* Review Action Bar */
     .review-bar {
       margin-top: auto;
       background: rgba(11, 15, 25, 0.95);
@@ -358,10 +528,7 @@
       flex-direction: column;
       gap: 10px;
     }
-    .review-buttons {
-      display: flex;
-      gap: 10px;
-    }
+    .review-buttons { display: flex; gap: 10px; }
     .btn-approve { background: rgba(16, 185, 129, 0.2); border: 1px solid var(--success); color: #34d399; }
     .btn-approve:hover { background: var(--success); color: white; }
     .btn-flag { background: rgba(245, 158, 11, 0.2); border: 1px solid var(--warning); color: #fbbf24; }
@@ -385,11 +552,7 @@
     }
 
     /* Chatbot Panel */
-    .chat-container {
-      display: flex;
-      flex-direction: column;
-      height: 100%;
-    }
+    .chat-container { display: flex; flex-direction: column; height: 100%; }
     .chat-messages {
       flex: 1;
       padding: 16px;
@@ -434,10 +597,7 @@
       cursor: pointer;
       transition: var(--transition);
     }
-    .chip:hover {
-      border-color: var(--accent);
-      color: var(--accent);
-    }
+    .chip:hover { border-color: var(--accent); color: var(--accent); }
     .chat-input-bar {
       padding: 14px 16px;
       border-top: 1px solid var(--card-border);
@@ -454,22 +614,11 @@
       font-family: inherit;
       font-size: 0.85rem;
     }
-    .chat-input:focus, .review-input:focus {
-      outline: none;
-      border-color: var(--primary);
-    }
+    .chat-input:focus, .review-input:focus { outline: none; border-color: var(--primary); }
 
-    /* Enterprise Table Styling */
-    .data-table-container {
-      overflow-x: auto;
-      padding: 16px;
-    }
-    table.enterprise-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.84rem;
-      text-align: left;
-    }
+    /* Tables */
+    .data-table-container { overflow-x: auto; padding: 16px; }
+    table.enterprise-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; text-align: left; }
     table.enterprise-table th {
       background: rgba(255, 255, 255, 0.05);
       color: var(--text-muted);
@@ -485,28 +634,12 @@
       border-bottom: 1px solid rgba(255, 255, 255, 0.04);
       color: var(--text-main);
     }
-    table.enterprise-table tr:hover td {
-      background: rgba(255, 255, 255, 0.02);
-    }
+    table.enterprise-table tr:hover td { background: rgba(255, 255, 255, 0.02); }
 
-    /* Form styling for adding Vector DB clause */
-    .clause-form {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 12px;
-      padding: 16px;
-    }
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
+    .clause-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding: 16px; }
+    .form-group { display: flex; flex-direction: column; gap: 4px; }
     .form-group.full { grid-column: 1 / -1; }
-    .form-label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-    }
+    .form-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; }
     .form-control {
       background: rgba(255, 255, 255, 0.05);
       border: 1px solid var(--card-border);
@@ -518,26 +651,7 @@
     }
     .form-control:focus { outline: none; border-color: var(--primary); }
 
-    /* Drag and drop upload zone */
-    .dropzone {
-      border: 2px dashed rgba(99, 102, 241, 0.4);
-      border-radius: 10px;
-      padding: 24px;
-      text-align: center;
-      background: rgba(99, 102, 241, 0.03);
-      cursor: pointer;
-      transition: var(--transition);
-      margin: 14px;
-    }
-    .dropzone:hover {
-      border-color: var(--primary);
-      background: rgba(99, 102, 241, 0.08);
-    }
-    .empty-state {
-      text-align: center;
-      padding: 40px 20px;
-      color: var(--text-muted);
-    }
+    .empty-state { text-align: center; padding: 40px 20px; color: var(--text-muted); }
   </style>
 </head>
 <body>
@@ -548,239 +662,353 @@
       <div class="brand-icon">IA</div>
       <div>
         <div class="brand-title">Procurement Invoice & Contract Auditor</div>
-        <div class="brand-subtitle">GenAI · 3-Way Match · Vector DB RAG · LangGraph Multi-Agents</div>
+        <div class="brand-subtitle">Parallel Multi-Agents · Dynamic LLM · Stateful Composite Ledger</div>
       </div>
     </div>
 
-    <!-- Navigation Tabs -->
-    <div class="nav-tabs">
+    <!-- Active Session Identifier -->
+    <div class="session-badge" id="session-badge">Session: Idle</div>
+
+    <!-- Navigation Tabs (Only visible when session is active) -->
+    <div class="nav-tabs" id="main-nav-tabs">
       <button class="nav-tab-btn active" onclick="switchView('audit')">🔍 Invoice Audit</button>
       <button class="nav-tab-btn" onclick="switchView('erp')">📊 ERP Tables (PO & Receipts)</button>
       <button class="nav-tab-btn" onclick="switchView('vectordb')">🧠 Vector DB Contracts</button>
     </div>
 
     <div class="header-actions">
-      <a href="/api/samples/download-zip" class="btn btn-outline" download style="text-decoration: none;">📥 Download Sample Pack (.zip)</a>
-      <button class="btn btn-outline" id="btn-load-samples">📦 Load Benchmark Samples</button>
-      <input type="file" id="pdf-upload-input" accept=".pdf" style="display: none;">
-      <button class="btn btn-primary" id="btn-upload">📄 Upload PDF Invoice</button>
+      <button class="btn btn-outline" id="btn-new-session" onclick="resetToUploadPortal()" style="display: none;">➕ New Session</button>
+      <a href="/api/samples/download-zip" class="btn btn-outline" download>📥 Download Sample Pack (.zip)</a>
     </div>
   </header>
 
-  <!-- VIEW 1: Main 3-Column Audit Cockpit -->
-  <main class="dashboard-container view-panel active" id="view-audit">
+  <!-- SCREEN 1: Clean Onboarding Upload Portal (Zero early files/tables) -->
+  <section class="screen active" id="screen-portal">
+    <div class="portal-container">
+      
+      <div class="portal-hero">
+        <h1>Multi-Agent Procurement Auditor</h1>
+        <p>Upload procurement documents to initialize an isolated audit session with folder persistence and parallel multi-agent processing.</p>
+      </div>
+
+      <div class="upload-grid">
+        <!-- 1. Invoice PDFs -->
+        <div class="upload-card" id="card-invoices" onclick="document.getElementById('input-invoices').click()">
+          <input type="file" id="input-invoices" accept=".pdf" multiple style="display: none;" onchange="handleFileSelected('invoices', this)">
+          <div class="upload-icon">📑</div>
+          <div class="upload-title">Invoice Documents (PDF)</div>
+          <div class="upload-desc">Required. Select or drag & drop one or multiple invoice PDFs.</div>
+          <div class="upload-status" id="status-invoices">No files selected</div>
+        </div>
+
+        <!-- 2. Purchase Orders -->
+        <div class="upload-card" id="card-pos" onclick="document.getElementById('input-pos').click()">
+          <input type="file" id="input-pos" accept=".json" style="display: none;" onchange="handleFileSelected('pos', this)">
+          <div class="upload-icon">📋</div>
+          <div class="upload-title">Purchase Orders (JSON)</div>
+          <div class="upload-desc">Optional. Authorized ERP purchase orders with line items and contracted prices.</div>
+          <div class="upload-status" id="status-pos">No file selected</div>
+        </div>
+
+        <!-- 3. Goods Receipts -->
+        <div class="upload-card" id="card-receipts" onclick="document.getElementById('input-receipts').click()">
+          <input type="file" id="input-receipts" accept=".json" style="display: none;" onchange="handleFileSelected('receipts', this)">
+          <div class="upload-icon">📦</div>
+          <div class="upload-title">Warehouse Goods Receipts (JSON)</div>
+          <div class="upload-desc">Optional. Physical goods receipt proof for 3-way matching verification.</div>
+          <div class="upload-status" id="status-receipts">No file selected</div>
+        </div>
+
+        <!-- 4. Contract Clauses -->
+        <div class="upload-card" id="card-contracts" onclick="document.getElementById('input-contracts').click()">
+          <input type="file" id="input-contracts" accept=".json,.txt" style="display: none;" onchange="handleFileSelected('contracts', this)">
+          <div class="upload-icon">📜</div>
+          <div class="upload-title">Contract Clauses / MSA (JSON / Text)</div>
+          <div class="upload-desc">Optional. Master terms and conditions for Vector RAG legal clause auditing.</div>
+          <div class="upload-status" id="status-contracts">No file selected</div>
+        </div>
+      </div>
+
+      <div class="portal-actions">
+        <div class="portal-quick-test">
+          <button class="btn btn-outline" id="btn-sample-pack" onclick="launchWithSamplePack()">⚡ Quick Test: Launch with Benchmark Sample Pack</button>
+        </div>
+        <button class="btn btn-primary" id="btn-start-workflow" onclick="startWorkflowExecution()" style="font-size: 0.95rem; padding: 10px 24px;">
+          🚀 Start Multi-Agent Audit Workflow
+        </button>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- SCREEN 2: Step-by-Step Parallel Workflow Stepper -->
+  <section class="screen" id="screen-stepper">
+    <div class="stepper-container">
+      <div class="stepper-card">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--card-border); padding-bottom: 16px;">
+          <div>
+            <h3 style="font-size: 1.15rem; font-weight: 600;">Executing Parallel Multi-Agent Audit Workflow</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">Session Workspace: <span id="stepper-session-id" style="color: #a5b4fc; font-family: monospace;">Initializing...</span></p>
+          </div>
+          <span class="badge badge-needs_review" id="stepper-overall-status">IN PROGRESS</span>
+        </div>
+
+        <!-- Step 1 -->
+        <div class="step-item" id="step-row-1">
+          <div class="step-icon" id="step-icon-1">🧠</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-title">Step 1: Contract Chunking & Vector RAG Indexing</span>
+              <span class="badge" id="step-badge-1" style="background: rgba(255,255,255,0.06);">PENDING</span>
+            </div>
+            <div class="step-desc" id="step-desc-1">Chunking contractual terms, tokenizing, and indexing into isolated session Vector DB in parallel.</div>
+          </div>
+        </div>
+
+        <!-- Step 2 -->
+        <div class="step-item" id="step-row-2">
+          <div class="step-icon" id="step-icon-2">⚡</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-title">Step 2: Dynamic PDF Extraction & Visual Line Reconstruction (Parallel)</span>
+              <span class="badge" id="step-badge-2" style="background: rgba(255,255,255,0.06);">PENDING</span>
+            </div>
+            <div class="step-desc" id="step-desc-2">Extracting all uploaded PDFs concurrently using horizontal visual coordinate parser & GenAI structured output.</div>
+          </div>
+        </div>
+
+        <!-- Step 3 -->
+        <div class="step-item" id="step-row-3">
+          <div class="step-icon" id="step-icon-3">⚖️</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-title">Step 3: Multi-Agent 3-Way Reconciliation & Vector RAG Audit</span>
+              <span class="badge" id="step-badge-3" style="background: rgba(255,255,255,0.06);">PENDING</span>
+            </div>
+            <div class="step-desc" id="step-desc-3">Running deterministic math validation, PO price & quantity variance matching, warehouse proof verification, and contract compliance checks.</div>
+          </div>
+        </div>
+
+        <!-- Step 4 -->
+        <div class="step-item" id="step-row-4">
+          <div class="step-icon" id="step-icon-4">🛡️</div>
+          <div class="step-content">
+            <div class="step-header">
+              <span class="step-title">Step 4: Cumulative Ledger & Composite History Verification</span>
+              <span class="badge" id="step-badge-4" style="background: rgba(255,255,255,0.06);">PENDING</span>
+            </div>
+            <div class="step-desc" id="step-desc-4">Verifying composite history key (Address + Name + ID + Date), computing risk exposure, and persisting session workspace.</div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 10px;">
+          <button class="btn btn-primary" id="btn-view-cockpit" onclick="transitionToCockpit()" style="display: none;">
+            View Audit Cockpit & Findings →
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCREEN 3: Active Session Audit Cockpit -->
+  <section class="screen" id="screen-cockpit">
     
-    <!-- Left Column: Uploaded Documents & Benchmark Samples -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">📑 Documents Queue</span>
-        <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;" id="doc-queue-badge">0 Loaded</span>
-      </div>
-
-      <!-- Quick Drag & Drop Upload Zone -->
-      <div class="dropzone" id="quick-dropzone" onclick="document.getElementById('pdf-upload-input').click()">
-        <p style="font-weight: 600; font-size: 0.88rem; color: #a5b4fc;">📂 Upload Invoice PDF</p>
-        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Click or drag & drop PDF here to audit</p>
-      </div>
-
-      <div class="sample-list" id="sample-list">
-        <div class="empty-state" style="padding: 24px 12px;">
-          <p style="font-size: 0.85rem; font-weight: 500; margin-bottom: 6px;">No documents loaded</p>
-          <p style="font-size: 0.75rem; color: var(--text-muted);">Please upload an invoice PDF above, or click 'Load Benchmark Samples' to test.</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Center Column: Multi-Agent Audit Cockpit -->
-    <div class="card" style="display: flex; flex-direction: column;">
-      <div class="card-header">
-        <span class="card-title">🔍 Multi-Agent Audit Cockpit</span>
-        <span id="active-inv-badge" class="badge badge-needs_review">Awaiting Document</span>
-      </div>
-
-      <div class="audit-body" id="audit-body">
-        <div class="empty-state" style="padding: 60px 20px;">
-          <div style="font-size: 3rem; margin-bottom: 14px;">📄</div>
-          <h3 style="font-size: 1.2rem; font-weight: 600; margin-bottom: 8px;">No Documents Audited Yet</h3>
-          <p style="font-size: 0.85rem; color: var(--text-muted); max-width: 440px; margin: 0 auto 18px; line-height: 1.5;">
-            Upload your invoice PDF to begin auditing. The system will extract line items, verify against authorized POs and Goods Receipts, and detect contractual discrepancies.
-          </p>
-          <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-            <button class="btn btn-primary" onclick="document.getElementById('pdf-upload-input').click()">📄 Upload Invoice PDF</button>
-            <a href="/api/samples/download-zip" class="btn btn-outline" download style="text-decoration: none;">📥 Download Sample Pack (.zip)</a>
-          </div>
-        </div>
-      </div>
-
-      <!-- Human in the Loop Decision Action Bar -->
-      <div class="review-bar" id="review-bar" style="display: none;">
-        <div class="section-title">✍️ Human-in-the-Loop Review Decision</div>
-        <input type="text" id="review-notes" class="review-input" placeholder="Enter auditor reasoning or corrective notes (optional)...">
-        <div class="review-buttons">
-          <button class="btn btn-approve" onclick="submitReview('approve')">✓ Approve</button>
-          <button class="btn btn-flag" onclick="submitReview('flag_for_correction')">⚠️ Flag for Correction</button>
-          <button class="btn btn-reject" onclick="submitReview('reject')">✕ Reject</button>
-        </div>
-        <div id="review-status-label" class="review-status"></div>
-      </div>
-    </div>
-
-    <!-- Right Column: AI Auditor Copilot Chatbot -->
-    <div class="card">
-      <div class="card-header">
-        <span class="card-title">🤖 Auditor AI Copilot</span>
-        <span class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--accent);">LLM + Vector RAG</span>
-      </div>
-      <div class="chat-container">
-        <div class="chat-messages" id="chat-messages">
-          <div class="chat-msg bot">
-            Hello! I am your AI Procurement Auditor. Ask me why an invoice was flagged, inquire about contractual terms, or query discrepancies.
-          </div>
-        </div>
-
-        <div class="chat-chips">
-          <span class="chip" onclick="sendChip(this)">Why was this invoice flagged?</span>
-          <span class="chip" onclick="sendChip(this)">What contract clause mentions freight?</span>
-          <span class="chip" onclick="sendChip(this)">What is the financial risk exposure?</span>
-        </div>
-
-        <div class="chat-input-bar">
-          <input type="text" id="chat-input" class="chat-input" placeholder="Ask about this invoice or contract...">
-          <button class="btn btn-primary" id="btn-send-chat">Send</button>
-        </div>
-      </div>
-    </div>
-
-  </main>
-
-  <!-- VIEW 2: Enterprise Relational ERP Tables (PO & Goods Receipts) -->
-  <main class="dashboard-container view-panel" id="view-erp">
-    <div class="full-width-container">
+    <!-- VIEW 1: Main 3-Column Audit Cockpit -->
+    <main class="dashboard-container view-panel active" id="view-audit">
       
-      <!-- Purchase Orders Table -->
+      <!-- Left Column: Session Documents Queue -->
       <div class="card">
         <div class="card-header">
-          <span class="card-title">📋 Authorized Purchase Orders (ERP Line Items)</span>
-          <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">Tabular Format</span>
+          <span class="card-title">📑 Session Documents</span>
+          <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;" id="doc-queue-badge">0 Documents</span>
         </div>
-        <div class="data-table-container">
-          <table class="enterprise-table" id="po-table">
-            <thead>
-              <tr>
-                <th>PO Number</th>
-                <th>Vendor</th>
-                <th>Line #</th>
-                <th>SKU</th>
-                <th>Description</th>
-                <th>Qty</th>
-                <th>Unit Price</th>
-                <th>Line Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colspan="8" style="text-align: center;">Loading PO table...</td></tr>
-            </tbody>
-          </table>
+        <div class="sample-list" id="sample-list">
+          <!-- Populated dynamically with session invoices -->
         </div>
       </div>
 
-      <!-- Goods Receipts Table -->
-      <div class="card">
+      <!-- Center Column: Multi-Agent Audit Findings -->
+      <div class="card" style="display: flex; flex-direction: column;">
         <div class="card-header">
-          <span class="card-title">📦 Warehouse Goods Receipts (3-Way Verification)</span>
-          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">Physical Receipt Proof</span>
+          <span class="card-title">🔍 Multi-Agent Audit Findings</span>
+          <span id="active-inv-badge" class="badge badge-needs_review">Awaiting Selection</span>
         </div>
-        <div class="data-table-container">
-          <table class="enterprise-table" id="gr-table">
-            <thead>
-              <tr>
-                <th>Receipt ID</th>
-                <th>PO Reference</th>
-                <th>Receipt Date</th>
-                <th>Line #</th>
-                <th>SKU</th>
-                <th>Quantity Received</th>
-                <th>Warehouse Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colspan="7" style="text-align: center;">Loading Goods Receipts...</td></tr>
-            </tbody>
-          </table>
+
+        <div class="audit-body" id="audit-body">
+          <!-- Populated dynamically -->
+        </div>
+
+        <!-- Human in the Loop Decision Action Bar -->
+        <div class="review-bar" id="review-bar" style="display: none;">
+          <div class="section-title">✍️ Human-in-the-Loop Review Decision</div>
+          <input type="text" id="review-notes" class="review-input" placeholder="Enter auditor reasoning or corrective notes (optional)...">
+          <div class="review-buttons">
+            <button class="btn btn-approve" onclick="submitReview('approve')">✓ Approve</button>
+            <button class="btn btn-flag" onclick="submitReview('flag_for_correction')">⚠️ Flag for Correction</button>
+            <button class="btn btn-reject" onclick="submitReview('reject')">✕ Reject</button>
+          </div>
+          <div id="review-status-label" class="review-status"></div>
         </div>
       </div>
 
-    </div>
-  </main>
-
-  <!-- VIEW 3: Vector DB Contract Clauses & Live Addition -->
-  <main class="dashboard-container view-panel" id="view-vectordb">
-    <div class="full-width-container">
-      
-      <!-- Add New Clause Card -->
+      <!-- Right Column: AI Auditor Copilot Chatbot -->
       <div class="card">
         <div class="card-header">
-          <span class="card-title">➕ Add Custom Contract Clause to Vector DB</span>
-          <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: var(--accent);">Dynamic Indexing</span>
+          <span class="card-title">🤖 Auditor AI Copilot</span>
+          <span class="badge" style="background: rgba(6, 182, 212, 0.15); color: var(--accent);">Session Vector RAG</span>
         </div>
-        <form id="add-clause-form" class="clause-form" onsubmit="handleAddClause(event)">
-          <div class="form-group">
-            <label class="form-label">Clause ID</label>
-            <input type="text" id="c-id" class="form-control" placeholder="e.g., MSA-ACME-SEC-3.1" required>
+        <div class="chat-container">
+          <div class="chat-messages" id="chat-messages">
+            <div class="chat-msg bot">
+              Hello! I am your AI Procurement Auditor for this session. Ask me why an invoice was flagged, query discrepancies, or inspect contractual clauses.
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">Vendor Name</label>
-            <input type="text" id="c-vendor" class="form-control" placeholder="e.g., Acme Industrial" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Title</label>
-            <input type="text" id="c-title" class="form-control" placeholder="e.g., Surcharge & Freight Restriction" required>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Prohibits Surcharges?</label>
-            <select id="c-prohibits" class="form-control">
-              <option value="true">Yes (Strictly Prohibits Freight/Fuel Fees)</option>
-              <option value="false">No (Standard Terms)</option>
-            </select>
-          </div>
-          <div class="form-group full">
-            <label class="form-label">Legal Clause Text</label>
-            <textarea id="c-content" class="form-control" rows="3" placeholder="Enter complete contractual clause text..." required></textarea>
-          </div>
-          <div class="form-group full" style="display: flex; justify-content: flex-end;">
-            <button type="submit" class="btn btn-primary">Index Clause in Vector DB</button>
-          </div>
-        </form>
-        <div id="clause-addition-feedback" style="padding: 0 16px 14px; font-size: 0.82rem; color: var(--accent);"></div>
-      </div>
 
-      <!-- Indexed Clauses Table -->
-      <div class="card">
-        <div class="card-header">
-          <span class="card-title">📚 Indexed Contract Clauses & Embeddings</span>
-          <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;" id="clause-count-badge">0 Clauses</span>
-        </div>
-        <div class="data-table-container">
-          <table class="enterprise-table" id="clauses-table">
-            <thead>
-              <tr>
-                <th>Clause ID</th>
-                <th>Vendor</th>
-                <th>Title</th>
-                <th>Token Count</th>
-                <th>Prohibits Surcharges</th>
-                <th>Content Text</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr><td colspan="6" style="text-align: center;">Loading clauses...</td></tr>
-            </tbody>
-          </table>
+          <div class="chat-chips">
+            <span class="chip" onclick="sendChip(this)">Why was this invoice flagged?</span>
+            <span class="chip" onclick="sendChip(this)">What contract clause mentions freight?</span>
+            <span class="chip" onclick="sendChip(this)">What is the financial risk exposure?</span>
+          </div>
+
+          <div class="chat-input-bar">
+            <input type="text" id="chat-input" class="chat-input" placeholder="Ask about this invoice or contract...">
+            <button class="btn btn-primary" id="btn-send-chat">Send</button>
+          </div>
         </div>
       </div>
 
-    </div>
-  </main>
+    </main>
+
+    <!-- VIEW 2: Enterprise Relational ERP Tables (Only for active session) -->
+    <main class="dashboard-container view-panel" id="view-erp">
+      <div class="full-width-container">
+        
+        <!-- Purchase Orders Table -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📋 Session Authorized Purchase Orders</span>
+            <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">Tabular ERP Format</span>
+          </div>
+          <div class="data-table-container">
+            <table class="enterprise-table" id="po-table">
+              <thead>
+                <tr>
+                  <th>PO Number</th>
+                  <th>Vendor</th>
+                  <th>Line #</th>
+                  <th>SKU</th>
+                  <th>Description</th>
+                  <th>Qty</th>
+                  <th>Unit Price</th>
+                  <th>Line Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="8" style="text-align: center;">No POs in this session.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Goods Receipts Table -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📦 Session Warehouse Goods Receipts</span>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399;">3-Way Receipt Proof</span>
+          </div>
+          <div class="data-table-container">
+            <table class="enterprise-table" id="gr-table">
+              <thead>
+                <tr>
+                  <th>Receipt ID</th>
+                  <th>PO Reference</th>
+                  <th>Receipt Date</th>
+                  <th>Line #</th>
+                  <th>SKU</th>
+                  <th>Quantity Received</th>
+                  <th>Warehouse Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="7" style="text-align: center;">No goods receipts in this session.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+    <!-- VIEW 3: Vector DB Contract Clauses & Live Addition -->
+    <main class="dashboard-container view-panel" id="view-vectordb">
+      <div class="full-width-container">
+        
+        <!-- Add New Clause Card -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">➕ Add Custom Clause to Session Vector DB</span>
+            <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: var(--accent);">Session Index</span>
+          </div>
+          <form id="add-clause-form" class="clause-form" onsubmit="handleAddClause(event)">
+            <div class="form-group">
+              <label class="form-label">Clause ID</label>
+              <input type="text" id="c-id" class="form-control" placeholder="e.g., MSA-ACME-SEC-3.1" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Vendor Name</label>
+              <input type="text" id="c-vendor" class="form-control" placeholder="e.g., Acme Industrial" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Title</label>
+              <input type="text" id="c-title" class="form-control" placeholder="e.g., Surcharge & Freight Restriction" required>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Prohibits Surcharges?</label>
+              <select id="c-prohibits" class="form-control">
+                <option value="true">Yes (Strictly Prohibits Freight/Fuel Fees)</option>
+                <option value="false">No (Standard Terms)</option>
+              </select>
+            </div>
+            <div class="form-group full">
+              <label class="form-label">Legal Clause Text</label>
+              <textarea id="c-content" class="form-control" rows="3" placeholder="Enter complete contractual clause text..." required></textarea>
+            </div>
+            <div class="form-group full" style="display: flex; justify-content: flex-end;">
+              <button type="submit" class="btn btn-primary">Index Clause in Session Vector DB</button>
+            </div>
+          </form>
+          <div id="clause-addition-feedback" style="padding: 0 16px 14px; font-size: 0.82rem; color: var(--accent);"></div>
+        </div>
+
+        <!-- Indexed Clauses Table -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📚 Indexed Contract Clauses in Active Session</span>
+            <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24;" id="clause-count-badge">0 Clauses</span>
+          </div>
+          <div class="data-table-container">
+            <table class="enterprise-table" id="clauses-table">
+              <thead>
+                <tr>
+                  <th>Clause ID</th>
+                  <th>Vendor</th>
+                  <th>Title</th>
+                  <th>Token Count</th>
+                  <th>Prohibits Surcharges</th>
+                  <th>Content Text</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td colspan="6" style="text-align: center;">No contract clauses indexed yet.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+      </div>
+    </main>
+
+  </section>
 
   <script src="/app.js"></script>
 </body>
