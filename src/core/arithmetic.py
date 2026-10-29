@@ -2,6 +2,7 @@
 
 Performs exact decimal mathematical checks without any LLM approximations.
 Detects missing mandatory fields and explicitly attaches Human-in-the-Loop review alerts.
+Accurately computes net financial exposure without compounding redundant line/subtotal errors.
 """
 
 from decimal import Decimal, ROUND_HALF_UP
@@ -72,11 +73,16 @@ def check_missing_fields(invoice: Invoice) -> List[Reason]:
 def validate_arithmetic(invoice: Invoice) -> Tuple[List[Reason], Decimal]:
     """Perform deterministic mathematical audits on line items, subtotals, and total.
     
+    Computes true net financial exposure without compounding downstream line-item
+    differences into the subtotal and grand total.
+    
     Returns:
-        Tuple of (list of reasons/discrepancies, total net discrepancy amount).
+        Tuple of (list of reasons/discrepancies, net financial discrepancy amount).
     """
     reasons: List[Reason] = []
-    total_discrepancy = Decimal("0.00")
+    line_diff_sum = Decimal("0.00")
+    subtotal_diff = Decimal("0.00")
+    total_diff = Decimal("0.00")
 
     # 1. Line item math: quantity x unit_price vs line_total
     computed_subtotal = Decimal("0.00")
@@ -105,7 +111,7 @@ def validate_arithmetic(invoice: Invoice) -> Tuple[List[Reason], Decimal]:
                     requires_hitl=True,
                 )
             )
-            total_discrepancy += diff
+            line_diff_sum += diff
         elif diff > Decimal("0.00"):
             reasons.append(
                 Reason(
@@ -142,7 +148,6 @@ def validate_arithmetic(invoice: Invoice) -> Tuple[List[Reason], Decimal]:
                     requires_hitl=True,
                 )
             )
-            total_discrepancy += subtotal_diff
 
     # 3. Grand total check: Subtotal - Discount + Tax + Freight = Total
     effective_subtotal = invoice.subtotal if invoice.subtotal is not None else computed_subtotal
@@ -173,6 +178,7 @@ def validate_arithmetic(invoice: Invoice) -> Tuple[List[Reason], Decimal]:
                     requires_hitl=True,
                 )
             )
-            total_discrepancy += total_diff
 
-    return reasons, quantize_money(total_discrepancy)
+    # Net variance: take the maximum exposure rather than triple-counting
+    net_exposure = max(total_diff, subtotal_diff, line_diff_sum)
+    return reasons, quantize_money(net_exposure)

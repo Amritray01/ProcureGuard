@@ -2,28 +2,12 @@
 
 let currentInvoiceId = null;
 let currentAuditData = null;
+let loadedDocuments = [];
 
 document.addEventListener("DOMContentLoaded", () => {
-  loadSamples();
   setupUploadAndDropzone();
-
-  // Setup re-generate button
-  document.getElementById("btn-re-synth").addEventListener("click", async () => {
-    const btn = document.getElementById("btn-re-synth");
-    btn.disabled = true;
-    btn.textContent = "Generating...";
-    try {
-      const res = await fetch("/api/dataset/generate", { method: "POST" });
-      await res.json();
-      await loadSamples();
-      appendBotMsg("✨ Generated fresh synthetic procurement suite with seeded discrepancies!");
-    } catch (err) {
-      alert("Error generating dataset: " + err.message);
-    } finally {
-      btn.disabled = false;
-      btn.textContent = "⚡ Generate Dataset";
-    }
-  });
+  setupSampleLoader();
+  checkExistingUploads();
 
   // Setup Chatbot
   document.getElementById("btn-send-chat").addEventListener("click", handleSendMessage);
@@ -48,6 +32,136 @@ function switchView(viewName) {
     document.querySelectorAll(".nav-tab-btn")[2].classList.add("active");
     document.getElementById("view-vectordb").classList.add("active");
     loadVectorDBClauses();
+  }
+}
+
+// --- Check Existing User Uploads on Load ---
+async function checkExistingUploads() {
+  try {
+    const res = await fetch("/api/documents/uploaded");
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      loadedDocuments = data.map(d => ({ ...d, type: "uploaded" }));
+      renderDocumentQueue();
+      // Select the first uploaded document
+      selectDocument(loadedDocuments[0].invoice_id, 0);
+    }
+  } catch (err) {
+    console.warn("Could not check uploaded documents:", err);
+  }
+}
+
+// --- Benchmark Sample Pack Loader ---
+function setupSampleLoader() {
+  const btn = document.getElementById("btn-load-samples");
+  if (!btn) return;
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    btn.textContent = "Loading Pack...";
+    try {
+      const res = await fetch("/api/dataset/samples");
+      const data = await res.json();
+      
+      const sampleDocs = data.invoices.map(inv => ({
+        invoice_id: inv.id,
+        filename: inv.file,
+        vendor: inv.vendor,
+        po_number: inv.po_number,
+        date: "2026-10-22",
+        decision: inv.expected_decision,
+        risk_score: inv.expected_decision === "auto_approve" ? 0 : (inv.expected_decision === "reject" ? 95 : 55),
+        financial_exposure: "0.00",
+        type: "sample",
+      }));
+
+      // Combine uploaded and samples
+      const existingIds = new Set(loadedDocuments.map(d => d.invoice_id));
+      for (const s of sampleDocs) {
+        if (!existingIds.has(s.invoice_id)) {
+          loadedDocuments.push(s);
+        }
+      }
+
+      renderDocumentQueue();
+      selectDocument(sampleDocs[0].invoice_id, 0);
+      appendBotMsg("📦 Loaded benchmark procurement suite into the queue! Select any invoice to inspect findings.");
+    } catch (err) {
+      alert("Error loading benchmark suite: " + err.message);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = "📦 Load Benchmark Samples";
+    }
+  });
+}
+
+// --- Render Document Queue in Left Sidebar ---
+function renderDocumentQueue() {
+  const listEl = document.getElementById("sample-list");
+  const badgeEl = document.getElementById("doc-queue-badge");
+
+  if (loadedDocuments.length === 0) {
+    badgeEl.textContent = "0 Loaded";
+    listEl.innerHTML = `
+      <div class="empty-state" style="padding: 24px 12px;">
+        <p style="font-size: 0.85rem; font-weight: 500; margin-bottom: 6px;">No documents loaded</p>
+        <p style="font-size: 0.75rem; color: var(--text-muted);">Please upload an invoice PDF above, or click 'Load Benchmark Samples' to test.</p>
+      </div>
+    `;
+    return;
+  }
+
+  badgeEl.textContent = `${loadedDocuments.length} Loaded`;
+  listEl.innerHTML = "";
+
+  loadedDocuments.forEach((doc, idx) => {
+    const item = document.createElement("div");
+    item.className = "sample-item" + (doc.invoice_id === currentInvoiceId ? " active" : "");
+    item.onclick = () => selectDocument(doc.invoice_id, idx);
+
+    const badgeClass = `badge-${doc.decision || 'needs_review'}`;
+    const typeTag = doc.type === "uploaded" 
+      ? `<span style="font-size: 0.65rem; color: #a5b4fc; background: rgba(99,102,241,0.15); padding: 2px 6px; border-radius: 4px;">UPLOADED</span>` 
+      : `<span style="font-size: 0.65rem; color: #94a3b8; background: rgba(255,255,255,0.06); padding: 2px 6px; border-radius: 4px;">SAMPLE</span>`;
+
+    item.innerHTML = `
+      <div class="sample-title">
+        <span style="display: flex; align-items: center; gap: 6px;">
+          ${doc.invoice_id}
+          ${typeTag}
+        </span>
+        <span class="badge ${badgeClass}">${(doc.decision || 'review').replace("_", " ")}</span>
+      </div>
+      <div class="sample-desc">${doc.vendor || 'Unknown Vendor'} • PO: ${doc.po_number || 'N/A'}</div>
+    `;
+    listEl.appendChild(item);
+  });
+}
+
+// --- Select and View Document ---
+async function selectDocument(invoiceId, idx) {
+  currentInvoiceId = invoiceId;
+
+  // Highlight in sidebar
+  document.querySelectorAll(".sample-item").forEach((item, i) => {
+    if (i === idx) item.classList.add("active");
+    else item.classList.remove("active");
+  });
+
+  const doc = loadedDocuments.find(d => d.invoice_id === invoiceId);
+  const body = document.getElementById("audit-body");
+
+  if (doc && doc.type === "sample") {
+    body.innerHTML = `<div class="empty-state">Auditing benchmark invoice <b>${invoiceId}</b> with LangGraph Multi-Agents...</div>`;
+    try {
+      const res = await fetch(`/api/audit/sample/${invoiceId}`, { method: "POST" });
+      const data = await res.json();
+      currentAuditData = data;
+      renderAuditResult(data);
+    } catch (err) {
+      body.innerHTML = `<div class="empty-state" style="color: var(--danger);">Audit failed: ${err.message}</div>`;
+    }
+  } else if (currentAuditData && currentAuditData.invoice_id === invoiceId) {
+    renderAuditResult(currentAuditData);
   }
 }
 
@@ -88,7 +202,7 @@ async function processUploadedFile(file) {
     <div class="empty-state">
       <div style="font-size: 1.5rem; margin-bottom: 8px;">⏳</div>
       <p style="font-size: 1.05rem; font-weight: 600;">Processing ${file.name} immediately...</p>
-      <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Running dynamic PDF extraction, deterministic 3-way matching, and LangGraph contract audit.</p>
+      <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 4px;">Storing separately in uploads/, running dynamic PDF extraction, deterministic 3-way matching, and LangGraph contract audit.</p>
     </div>
   `;
 
@@ -97,63 +211,39 @@ async function processUploadedFile(file) {
 
   try {
     const res = await fetch("/api/audit/pdf", { method: "POST", body: formData });
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.detail || `HTTP ${res.status}`);
+    }
     const data = await res.json();
     currentInvoiceId = data.invoice_id;
     currentAuditData = data;
+
+    // Add to loaded documents list
+    const docEntry = {
+      invoice_id: data.invoice_id,
+      filename: file.name,
+      vendor: "Extracted Supplier",
+      po_number: "PO Reference",
+      date: new Date().toISOString().split("T")[0],
+      decision: data.decision,
+      risk_score: data.risk_score,
+      financial_exposure: String(data.financial_exposure),
+      type: "uploaded",
+    };
+
+    const existingIdx = loadedDocuments.findIndex(d => d.invoice_id === data.invoice_id);
+    if (existingIdx >= 0) {
+      loadedDocuments[existingIdx] = docEntry;
+    } else {
+      loadedDocuments.unshift(docEntry);
+    }
+
+    renderDocumentQueue();
     renderAuditResult(data);
-    appendBotMsg(`Audited uploaded document **${file.name}**. Audit Decision: **${data.decision.toUpperCase()}**.`);
+    appendBotMsg(`Audited uploaded document **${file.name}**. Stored separately in \`data/uploads/\`. Audit Decision: **${data.decision.toUpperCase()}**.`);
   } catch (err) {
     body.innerHTML = `<div class="empty-state" style="color: var(--danger);">Upload & Processing failed: ${err.message}</div>`;
-  }
-}
-
-// --- Sample Loading ---
-async function loadSamples() {
-  const listEl = document.getElementById("sample-list");
-  try {
-    const res = await fetch("/api/dataset/samples");
-    const data = await res.json();
-
-    listEl.innerHTML = "";
-    data.invoices.forEach((inv, idx) => {
-      const item = document.createElement("div");
-      item.className = "sample-item" + (idx === 0 ? " active" : "");
-      item.onclick = () => selectSample(inv.id, item);
-
-      const badgeClass = `badge-${inv.expected_decision}`;
-      item.innerHTML = `
-        <div class="sample-title">
-          <span>${inv.id}</span>
-          <span class="badge ${badgeClass}">${inv.expected_decision.replace("_", " ")}</span>
-        </div>
-        <div class="sample-desc">${inv.vendor} • ${inv.po_number}</div>
-      `;
-      listEl.appendChild(item);
-    });
-
-    if (data.invoices.length > 0) {
-      selectSample(data.invoices[0].id, listEl.children[0]);
-    }
-  } catch (err) {
-    listEl.innerHTML = `<div class="empty-state">Failed to load samples: ${err.message}</div>`;
-  }
-}
-
-async function selectSample(invoiceId, el) {
-  document.querySelectorAll(".sample-item").forEach(item => item.classList.remove("active"));
-  if (el) el.classList.add("active");
-
-  currentInvoiceId = invoiceId;
-  const body = document.getElementById("audit-body");
-  body.innerHTML = `<div class="empty-state">Auditing <b>${invoiceId}</b> with LangGraph Multi-Agents...</div>`;
-
-  try {
-    const res = await fetch(`/api/audit/sample/${invoiceId}`, { method: "POST" });
-    const data = await res.json();
-    currentAuditData = data;
-    renderAuditResult(data);
-  } catch (err) {
-    body.innerHTML = `<div class="empty-state" style="color: var(--danger);">Audit failed: ${err.message}</div>`;
   }
 }
 
@@ -187,7 +277,7 @@ function renderAuditResult(data) {
       </div>
       <div class="stat-box">
         <span class="stat-label">Discrepancy Variance</span>
-        <span class="stat-value" style="color: ${data.financial_exposure > 0 ? 'var(--danger)' : 'var(--text-main)'};">
+        <span class="stat-value" style="color: ${parseFloat(data.financial_exposure) > 0 ? 'var(--danger)' : 'var(--text-main)'};">
           $${parseFloat(data.financial_exposure).toFixed(2)}
         </span>
       </div>
@@ -288,51 +378,60 @@ async function submitReview(action) {
 
 // --- ERP Tables Loading ---
 async function loadERPTables() {
+  const poTbody = document.querySelector("#po-table tbody");
+  const grTbody = document.querySelector("#gr-table tbody");
+
   // 1. POs Table
   try {
     const resPo = await fetch("/api/erp/purchase-orders");
     const pos = await resPo.json();
-    const poTbody = document.querySelector("#po-table tbody");
-    poTbody.innerHTML = "";
-    pos.forEach(row => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><b style="color: #a5b4fc;">${row.po_number}</b></td>
-        <td>${row.vendor}</td>
-        <td>#${row.line_number}</td>
-        <td><code>${row.sku}</code></td>
-        <td>${row.description}</td>
-        <td>${row.quantity}</td>
-        <td>$${row.unit_price}</td>
-        <td><b>$${row.line_total}</b></td>
-      `;
-      poTbody.appendChild(tr);
-    });
+    if (!pos || pos.length === 0) {
+      poTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">No ERP purchase orders loaded yet. Please upload an invoice or load the benchmark pack.</td></tr>`;
+    } else {
+      poTbody.innerHTML = "";
+      pos.forEach(row => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><b style="color: #a5b4fc;">${row.po_number}</b></td>
+          <td>${row.vendor}</td>
+          <td>#${row.line_number}</td>
+          <td><code>${row.sku}</code></td>
+          <td>${row.description}</td>
+          <td>${row.quantity}</td>
+          <td>$${row.unit_price}</td>
+          <td><b>$${row.line_total}</b></td>
+        `;
+        poTbody.appendChild(tr);
+      });
+    }
   } catch (e) {
-    console.error("Failed to load POs:", e);
+    poTbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--danger);">Failed to load POs: ${e.message}</td></tr>`;
   }
 
   // 2. Goods Receipts Table
   try {
     const resGr = await fetch("/api/erp/goods-receipts");
     const grs = await resGr.json();
-    const grTbody = document.querySelector("#gr-table tbody");
-    grTbody.innerHTML = "";
-    grs.forEach(row => {
-      const tr = document.createElement("tr");
-      tr.innerHTML = `
-        <td><b style="color: #34d399;">${row.receipt_id}</b></td>
-        <td><b style="color: #a5b4fc;">${row.po_number}</b></td>
-        <td>${row.receipt_date}</td>
-        <td>#${row.line_number}</td>
-        <td><code>${row.sku}</code></td>
-        <td>${row.quantity_received}</td>
-        <td><span class="badge badge-auto_approve">${row.status}</span></td>
-      `;
-      grTbody.appendChild(tr);
-    });
+    if (!grs || grs.length === 0) {
+      grTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">No warehouse goods receipts loaded yet. Please upload an invoice or load the benchmark pack.</td></tr>`;
+    } else {
+      grTbody.innerHTML = "";
+      grs.forEach(row => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td><b style="color: #34d399;">${row.receipt_id}</b></td>
+          <td><b style="color: #a5b4fc;">${row.po_number}</b></td>
+          <td>${row.receipt_date}</td>
+          <td>#${row.line_number}</td>
+          <td><code>${row.sku}</code></td>
+          <td>${row.quantity_received}</td>
+          <td><span class="badge badge-auto_approve">${row.status}</span></td>
+        `;
+        grTbody.appendChild(tr);
+      });
+    }
   } catch (e) {
-    console.error("Failed to load Goods Receipts:", e);
+    grTbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger);">Failed to load Goods Receipts: ${e.message}</td></tr>`;
   }
 }
 

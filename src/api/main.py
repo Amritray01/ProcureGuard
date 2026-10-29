@@ -1,21 +1,23 @@
 """FastAPI Web Service for Procurement Invoice & Contract Auditor.
 
 Exposes REST endpoints for:
-- Immediate PDF document upload & LangGraph multi-agent auditing
-- ERP Tabular Data: Purchase Orders & Goods Receipts tables
+- Immediate PDF document upload & LangGraph multi-agent auditing (non-blocking threadpool execution)
+- ERP Tabular Data: Purchase Orders & Goods Receipts tables (via Pydantic model projections)
 - Vector DB: Contract clauses addition and live details inspection
 - Human-in-the-Loop review actions (Approve, Flag for correction, Reject)
 - LLM-powered Auditor Chatbot copilot
 - Synthetic dataset generation
 """
 
+import asyncio
+from collections import OrderedDict
 from decimal import Decimal
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -38,17 +40,24 @@ from src.core.llm import llm_client
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR = DATA_DIR / "uploads"
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024  # 15 MB limit
+MAX_CACHE_ENTRIES = 500
+
+uploaded_documents: List[Dict[str, Any]] = []
 
 app = FastAPI(
     title="Procurement Invoice & Contract Auditor API",
     description="Deterministic 3-Way Math + Contract Vector RAG + LangGraph Multi-Agents",
-    version="1.1.0",
+    version="1.2.0",
 )
 
+# Safe CORS configuration (avoid invalid wildcard with credentials)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -57,13 +66,38 @@ app.add_middleware(
 ledger = CumulativeLedger()
 contract_rag = ContractRAGStore()
 workflow = AuditWorkflow(ledger=ledger, contract_rag=contract_rag)
-hitl_manager = HITLReviewManager(log_path=DATA_DIR / "audit_log.json")
 extractor = PDFExtractor()
 
 # ERP Stores (Table formats for POs and Receipts)
 po_store: Dict[str, PurchaseOrder] = {}
 gr_store: Dict[str, GoodsReceipt] = {}
-audit_cache: Dict[str, AuditResult] = {}
+invoice_store: Dict[str, Invoice] = {}
+audit_cache: OrderedDict[str, AuditResult] = OrderedDict()
+
+
+def cache_audit_result(key: str, result: AuditResult) -> None:
+    """Store audit result with LRU bounding to avoid memory leaks."""
+    if key in audit_cache:
+        audit_cache.move_to_end(key)
+    audit_cache[key] = result
+    if len(audit_cache) > MAX_CACHE_ENTRIES:
+        audit_cache.popitem(last=False)
+
+
+def on_human_approval_commit(invoice_id: str) -> None:
+    """Commit an approved invoice and its mapped line items into the cumulative ledger."""
+    inv = invoice_store.get(invoice_id)
+    if inv:
+        po = po_store.get(inv.po_number or "")
+        cached = audit_cache.get(invoice_id)
+        lines_map = cached.matched_lines_map if cached else None
+        workflow.commit_invoice_to_ledger(inv, po, lines_map)
+
+
+hitl_manager = HITLReviewManager(
+    log_path=DATA_DIR / "audit_log.json",
+    on_approve_callback=on_human_approval_commit,
+)
 
 
 def load_fixtures():
@@ -119,44 +153,23 @@ class AddClauseRequest(BaseModel):
     discount_percentage: Optional[Decimal] = None
 
 
-# --- ERP Tabular Endpoints (PO & Goods Receipts) ---
+# --- ERP Tabular Endpoints (Lean Pydantic Projections) ---
 
 @app.get("/api/erp/purchase-orders")
 def get_purchase_orders_table():
-    """Return Purchase Orders in tabular enterprise ERP format."""
+    """Return Purchase Orders in tabular enterprise ERP format via model projection."""
     rows = []
     for po in po_store.values():
-        for line in po.lines:
-            rows.append({
-                "po_number": po.po_number,
-                "vendor": po.vendor,
-                "currency": po.currency,
-                "receipt_required": po.receipt_required,
-                "line_number": line.line_number,
-                "sku": line.sku or "N/A",
-                "description": line.description,
-                "quantity": str(line.quantity),
-                "unit_price": str(line.unit_price),
-                "line_total": str((line.quantity * line.unit_price).quantize(Decimal("0.01"))),
-            })
+        rows.extend(po.to_table_rows())
     return rows
 
 
 @app.get("/api/erp/goods-receipts")
 def get_goods_receipts_table():
-    """Return Goods Receipts in tabular enterprise warehouse format."""
+    """Return Goods Receipts in tabular warehouse format via model projection."""
     rows = []
     for gr in gr_store.values():
-        for line in gr.lines:
-            rows.append({
-                "receipt_id": gr.receipt_id,
-                "po_number": gr.po_number,
-                "receipt_date": gr.receipt_date,
-                "line_number": line.line_number,
-                "sku": line.sku or "N/A",
-                "quantity_received": str(line.quantity_received),
-                "status": "Verified in Warehouse",
-            })
+        rows.extend(gr.to_table_rows())
     return rows
 
 
@@ -184,27 +197,82 @@ def add_vector_db_clause(req: AddClauseRequest):
     return {"status": "indexed", "clause_details": details}
 
 
-# --- Ingestion & LangGraph Audit Endpoints ---
+# --- Ingestion & LangGraph Audit Endpoints (Non-blocking Threadpool) ---
 
 @app.post("/api/audit/pdf")
 async def audit_uploaded_pdf(file: UploadFile = File(...)):
-    """Upload custom invoice PDF and immediately execute LangGraph multi-agent audit."""
+    """Upload custom invoice PDF, save separately in uploads/, validate, and audit."""
     contents = await file.read()
-    invoice, extract_reasons = extractor.extract_from_bytes(contents)
+
+    # Security check 1: File size ceiling
+    if len(contents) > MAX_FILE_SIZE_BYTES:
+        raise HTTPException(status_code=413, detail="File size exceeds maximum allowed limit of 15 MB.")
+
+    # Security check 2: PDF Magic bytes validation
+    if not contents.startswith(b"%PDF-"):
+        raise HTTPException(status_code=400, detail="Invalid file type. Only valid PDF documents with %PDF- header are accepted.")
+
+    # Save uploaded document separately in uploads directory
+    safe_filename = Path(file.filename or "uploaded_invoice.pdf").name
+    upload_path = UPLOADS_DIR / safe_filename
+    with open(upload_path, "wb") as f:
+        f.write(contents)
+
+    # Execute CPU/IO bound extraction in background thread to avoid event loop starvation
+    invoice, extract_reasons = await asyncio.to_thread(extractor.extract_from_bytes, contents)
 
     po = po_store.get(invoice.po_number or "")
     receipt = gr_store.get(invoice.po_number or "")
 
-    inv_id = invoice.invoice_number or file.filename or "CUSTOM_INVOICE"
-    result = workflow.run_audit(invoice=invoice, po=po, receipt=receipt)
-    audit_cache[inv_id] = result
+    inv_id = invoice.invoice_number or safe_filename or "CUSTOM_INVOICE"
+    invoice_store[inv_id] = invoice
+
+    # Execute LangGraph multi-agent pipeline non-blockingly
+    result = await asyncio.to_thread(workflow.run_audit, invoice=invoice, po=po, receipt=receipt)
+    cache_audit_result(inv_id, result)
+
+    # Track uploaded document separately from benchmark sample files
+    doc_info = {
+        "invoice_id": inv_id,
+        "filename": safe_filename,
+        "vendor": invoice.vendor or "Unknown Vendor",
+        "po_number": invoice.po_number or "N/A",
+        "date": invoice.date or "N/A",
+        "decision": result.decision.value,
+        "risk_score": result.risk_score,
+        "financial_exposure": str(result.financial_exposure),
+    }
+    existing_idx = next((i for i, d in enumerate(uploaded_documents) if d["invoice_id"] == inv_id), None)
+    if existing_idx is not None:
+        uploaded_documents[existing_idx] = doc_info
+    else:
+        uploaded_documents.insert(0, doc_info)
 
     return result.model_dump(mode="json")
 
 
+@app.get("/api/documents/uploaded")
+def list_uploaded_documents():
+    """List documents uploaded by the user stored separately in uploads directory."""
+    return uploaded_documents
+
+
+@app.get("/api/samples/download-zip")
+def download_sample_documents_zip():
+    """Download ZIP archive containing all sample benchmark documents for procurement auditing."""
+    zip_path = DATA_DIR / "sample_procurement_documents.zip"
+    if not zip_path.exists():
+        generate_synthetic_dataset(DATA_DIR)
+    return FileResponse(
+        path=str(zip_path),
+        filename="sample_procurement_documents.zip",
+        media_type="application/zip",
+    )
+
+
 @app.post("/api/audit/sample/{invoice_id}")
-def audit_sample_endpoint(invoice_id: str):
-    """Run full LangGraph audit on a sample benchmark invoice."""
+async def audit_sample_endpoint(invoice_id: str):
+    """Run full LangGraph audit on a sample benchmark invoice non-blockingly."""
     manifest_file = DATA_DIR / "manifest.json"
     if not manifest_file.exists():
         generate_synthetic_dataset(DATA_DIR)
@@ -218,13 +286,14 @@ def audit_sample_endpoint(invoice_id: str):
         raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found.")
 
     pdf_path = DATA_DIR / "invoices" / target_inv["file"]
-    invoice, extract_reasons = extractor.extract_from_path(pdf_path)
+    invoice, extract_reasons = await asyncio.to_thread(extractor.extract_from_path, pdf_path)
+    invoice_store[invoice_id] = invoice
 
     po = po_store.get(invoice.po_number or "")
     receipt = gr_store.get(invoice.po_number or "")
 
-    result = workflow.run_audit(invoice=invoice, po=po, receipt=receipt)
-    audit_cache[invoice_id] = result
+    result = await asyncio.to_thread(workflow.run_audit, invoice=invoice, po=po, receipt=receipt)
+    cache_audit_result(invoice_id, result)
 
     human_dec = hitl_manager.get_decision(invoice_id)
     if human_dec:
@@ -257,7 +326,7 @@ def get_sample_invoices():
 
 @app.post("/api/review")
 def record_human_decision(req: ReviewRequest):
-    """Record Human-in-the-Loop decision."""
+    """Record Human-in-the-Loop decision and commit to ledger if approved."""
     decision = hitl_manager.record_decision(
         invoice_id=req.invoice_id,
         reviewer_id=req.reviewer_id,
@@ -273,7 +342,7 @@ def record_human_decision(req: ReviewRequest):
 
 
 @app.post("/api/chat")
-def auditor_chatbot(req: ChatRequest):
+async def auditor_chatbot(req: ChatRequest):
     """LLM-backed conversational copilot with Vector DB RAG and active audit context."""
     user_msg = req.message
     target_id = req.invoice_id
@@ -298,8 +367,9 @@ def auditor_chatbot(req: ChatRequest):
         for c, score in retrieved_clauses
     ])
 
-    # Call LLM client (with automatic lowercase semantic fallback)
-    reply = llm_client.chat_reply(
+    # Call LLM client non-blockingly
+    reply = await asyncio.to_thread(
+        llm_client.chat_reply,
         query=user_msg,
         invoice_context=inv_context,
         contract_context=contract_context,

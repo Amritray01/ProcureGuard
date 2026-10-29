@@ -3,6 +3,7 @@
 Compares invoice line items strictly against authorized Purchase Orders (PO) and
 warehouse Goods Receipts. Remembers historical billings across multiple invoices to
 catch duplicate submissions, cumulative overbilling, and unreceived shipments.
+Tracks exact matched PO line mappings for accurate ledger updating.
 """
 
 from collections import defaultdict
@@ -18,6 +19,11 @@ from src.core.schema import (
     Severity,
 )
 from src.core.arithmetic import quantize_money
+from src.core.normalization import (
+    build_unique_history_key,
+    normalize_address,
+    normalize_entity_name,
+)
 
 
 class CumulativeLedger:
@@ -27,6 +33,9 @@ class CumulativeLedger:
         # Seen invoices key: (normalized_vendor, normalized_invoice_num)
         self.seen_invoices: Set[Tuple[str, str]] = set()
 
+        # Composite unique history fingerprints: Address + Name + ID + Date
+        self.seen_history_keys: Set[str] = set()
+
         # Near-duplicate lookup: (normalized_vendor, currency, total) -> invoice_num
         self.amount_fingerprints: Dict[Tuple[str, str, str], str] = {}
 
@@ -34,24 +43,36 @@ class CumulativeLedger:
         self.billed_quantities: Dict[Tuple[str, int], Decimal] = defaultdict(lambda: Decimal("0.0"))
 
     def check_duplicate(self, invoice: Invoice) -> Optional[Reason]:
-        """Check for exact duplicate and near duplicate invoice submissions."""
+        """Check for exact duplicate and near duplicate invoice submissions using composite history."""
         if not invoice.invoice_number or not invoice.vendor:
             return None
 
-        vendor_key = invoice.vendor.strip().lower()
+        vendor_key = normalize_entity_name(invoice.vendor)
         inv_num_key = invoice.invoice_number.strip().lower()
 
-        # 1. Exact Duplicate
-        if (vendor_key, inv_num_key) in self.seen_invoices:
+        # 1. Composite Unique History Check (Address + Name + ID + Date)
+        comp_key = build_unique_history_key(
+            vendor=invoice.vendor,
+            invoice_number=invoice.invoice_number,
+            date=invoice.date,
+            address=invoice.vendor_address,
+        )
+        if comp_key in self.seen_history_keys or (vendor_key, inv_num_key) in self.seen_invoices:
             return Reason(
                 code=ReasonCode.DUPLICATE_INVOICE,
                 severity=Severity.REJECT,
                 message=(
-                    f"Duplicate invoice detected: Vendor '{invoice.vendor}' and Invoice "
-                    f"Number '{invoice.invoice_number}' were already processed previously. "
+                    f"Duplicate invoice detected: Vendor '{invoice.vendor}', Invoice "
+                    f"#{invoice.invoice_number} (Unique History Key: '{comp_key}') was already recorded. "
                     f"Immediate rejection recommended; verify with Human-In-The-Loop review."
                 ),
-                details={"vendor": invoice.vendor, "invoice_number": invoice.invoice_number},
+                details={
+                    "vendor": invoice.vendor,
+                    "invoice_number": invoice.invoice_number,
+                    "date": invoice.date,
+                    "vendor_address": invoice.vendor_address,
+                    "composite_key": comp_key,
+                },
                 requires_hitl=True,
             )
 
@@ -75,11 +96,19 @@ class CumulativeLedger:
         return None
 
     def record_invoice(self, invoice: Invoice) -> None:
-        """Record successful or processed invoice into the ledger."""
+        """Record successful or processed invoice into the ledger with composite fingerprint."""
         if invoice.invoice_number and invoice.vendor:
-            vendor_key = invoice.vendor.strip().lower()
+            vendor_key = normalize_entity_name(invoice.vendor)
             inv_num_key = invoice.invoice_number.strip().lower()
             self.seen_invoices.add((vendor_key, inv_num_key))
+
+            comp_key = build_unique_history_key(
+                vendor=invoice.vendor,
+                invoice_number=invoice.invoice_number,
+                date=invoice.date,
+                address=invoice.vendor_address,
+            )
+            self.seen_history_keys.add(comp_key)
 
             if invoice.total is not None:
                 fp_key = (vendor_key, invoice.currency.upper(), str(invoice.total))
@@ -105,22 +134,22 @@ class DeterministicMatcher:
         invoice: Invoice,
         po: Optional[PurchaseOrder] = None,
         receipt: Optional[GoodsReceipt] = None,
-    ) -> Tuple[List[Reason], Decimal]:
+    ) -> Tuple[List[Reason], Decimal, Dict[int, int]]:
         """Perform deterministic matching.
         
         Returns:
-            Tuple of (reasons, total financial variance detected)
+            Tuple of (reasons, total financial variance detected, map of invoice line -> po line).
         """
         reasons: List[Reason] = []
         financial_variance = Decimal("0.00")
+        matched_lines_map: Dict[int, int] = {}
 
         # 1. Duplicate Check via Stateful Ledger
         dup_reason = self.ledger.check_duplicate(invoice)
         if dup_reason:
             reasons.append(dup_reason)
             if dup_reason.severity == Severity.REJECT:
-                # Fatal duplicate; reject immediately
-                return reasons, invoice.total or Decimal("0.00")
+                return reasons, invoice.total or Decimal("0.00"), matched_lines_map
 
         # 2. Check PO Availability
         if not po:
@@ -136,12 +165,12 @@ class DeterministicMatcher:
                     requires_hitl=True,
                 )
             )
-            return reasons, invoice.total or Decimal("0.00")
+            return reasons, invoice.total or Decimal("0.00"), matched_lines_map
 
-        # 3. Vendor Matching
+        # 3. Vendor Matching with corporate legal suffix tolerance (ABC vs ABC Inc)
         if invoice.vendor and po.vendor:
-            norm_inv_v = invoice.vendor.strip().lower()
-            norm_po_v = po.vendor.strip().lower()
+            norm_inv_v = normalize_entity_name(invoice.vendor)
+            norm_po_v = normalize_entity_name(po.vendor)
             if norm_inv_v != norm_po_v and norm_inv_v not in norm_po_v and norm_po_v not in norm_inv_v:
                 reasons.append(
                     Reason(
@@ -221,6 +250,7 @@ class DeterministicMatcher:
                 continue
 
             matched_po_line_nums.add(matched_po_line.line_number)
+            matched_lines_map[inv_line.line_number] = matched_po_line.line_number
 
             # A. Price Variance Check
             price_variance = inv_line.unit_price - matched_po_line.unit_price
@@ -339,4 +369,4 @@ class DeterministicMatcher:
                 )
             )
 
-        return reasons, quantize_money(financial_variance)
+        return reasons, quantize_money(financial_variance), matched_lines_map

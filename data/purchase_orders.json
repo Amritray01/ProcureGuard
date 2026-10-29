@@ -2,6 +2,8 @@
   {
     "po_number": "PO-2026-001",
     "vendor": "Apex Industrial Supply",
+    "vendor_address": "100 Industrial Parkway, Suite 400, Chicago, IL 60601",
+    "date": "2026-10-10",
     "currency": "USD",
     "receipt_required": true,
     "max_tolerated_price_variance": "0.00",
@@ -25,6 +27,8 @@
   {
     "po_number": "PO-2026-002",
     "vendor": "Nexus Cloud Hardware",
+    "vendor_address": "750 Innovation Way, Austin, TX 78701",
+    "date": "2026-10-12",
     "currency": "USD",
     "receipt_required": true,
     "max_tolerated_price_variance": "0.00",
@@ -41,6 +45,8 @@
   {
     "po_number": "PO-2026-003",
     "vendor": "Vanguard Logistics & Parts",
+    "vendor_address": "520 Commerce Blvd, Atlanta, GA 30303",
+    "date": "2026-10-14",
     "currency": "USD",
     "receipt_required": true,
     "max_tolerated_price_variance": "0.00",

@@ -4,6 +4,8 @@ Design Principles:
 1. Simple & bounded: Linear StateGraph with strict max iterations (recursion limit).
 2. Zero data redundancy: Deduplicates reasons and evidence items in-place.
 3. Explicit Human-In-The-Loop routing for missing fields or variances.
+4. Idempotent & Side-Effect Free: run_audit does NOT pollute or advance the ledger on read.
+   Committing to the ledger only happens on explicit human approval or commit action.
 """
 
 from decimal import Decimal
@@ -41,6 +43,7 @@ class AuditGraphState(TypedDict):
     requires_human_review: bool
     human_in_loop_message: Optional[str]
     investigation_summary: str
+    matched_lines_map: Dict[int, int]
 
 
 def deduplicate_reasons(reasons: List[Reason]) -> List[Reason]:
@@ -83,7 +86,7 @@ class AuditWorkflow:
     def _build_graph(self):
         graph = StateGraph(AuditGraphState)
 
-        # 3 Simple, focused nodes (no overcomplicated nested sub-agents)
+        # 3 Simple, focused nodes
         graph.add_node("validator", self._validator_node)
         graph.add_node("reconciler", self._reconciler_node)
         graph.add_node("contract_and_triage", self._contract_and_triage_node)
@@ -137,7 +140,7 @@ class AuditWorkflow:
         financial_exposure = state["financial_exposure"]
         evidence = list(state["evidence_bundle"])
 
-        match_reasons, match_variance = self.matcher.match(invoice, po, receipt)
+        match_reasons, match_variance, matched_lines = self.matcher.match(invoice, po, receipt)
         reasons.extend(match_reasons)
         financial_exposure += match_variance
 
@@ -167,6 +170,7 @@ class AuditWorkflow:
             "reasons": deduplicate_reasons(reasons),
             "financial_exposure": financial_exposure,
             "evidence_bundle": deduplicate_evidence(evidence),
+            "matched_lines_map": matched_lines,
         }
 
     def _contract_and_triage_node(self, state: AuditGraphState) -> Dict:
@@ -214,7 +218,7 @@ class AuditWorkflow:
         if requires_hitl:
             hitl_items = [r.message for r in hitl_reasons if "Missing" in r.message or "Human-In-The-Loop" in r.message]
             if hitl_items:
-                hitl_msg = hitl_items[0]  # Most critical primary missing field alert
+                hitl_msg = hitl_items[0]
             else:
                 hitl_msg = f"Review required. Discrepancy financial exposure: ${financial_exposure}. Human verification required."
 
@@ -235,7 +239,11 @@ class AuditWorkflow:
         po: Optional[PurchaseOrder] = None,
         receipt: Optional[GoodsReceipt] = None,
     ) -> AuditResult:
-        """Run the bounded LangGraph audit pipeline with strict max iterations."""
+        """Run the bounded LangGraph audit pipeline with strict max iterations.
+        
+        Note: This method is purely IDEMPOTENT. It audits against current ledger state
+        without mutating or advancing billing counts, preventing self-duplicate traps.
+        """
         initial_state: AuditGraphState = {
             "invoice": invoice,
             "po": po,
@@ -248,20 +256,14 @@ class AuditWorkflow:
             "requires_human_review": False,
             "human_in_loop_message": None,
             "investigation_summary": "",
+            "matched_lines_map": {},
         }
 
-        # Max iterations / recursion limit configured to avoid unbounded cycles
+        # Max iterations ceiling
         final_state = self.app.invoke(
             initial_state,
             config={"recursion_limit": MAX_GRAPH_ITERATIONS},
         )
-
-        # Update cumulative ledger for non-rejected items to track multi-part PO billing
-        if final_state["decision"] in (Decision.AUTO_APPROVE, Decision.NEEDS_REVIEW):
-            self.ledger.record_invoice(invoice)
-            if po:
-                for line in invoice.lines:
-                    self.ledger.record_po_billing(po.po_number, line.line_number, line.quantity)
 
         return AuditResult(
             invoice_id=invoice.invoice_number or "UNASSIGNED",
@@ -273,4 +275,23 @@ class AuditWorkflow:
             human_in_loop_message=final_state["human_in_loop_message"],
             financial_exposure=final_state["financial_exposure"],
             investigation_summary=final_state["investigation_summary"],
+            matched_lines_map=final_state.get("matched_lines_map", {}),
         )
+
+    def commit_invoice_to_ledger(
+        self,
+        invoice: Invoice,
+        po: Optional[PurchaseOrder] = None,
+        matched_lines_map: Optional[Dict[int, int]] = None,
+    ) -> None:
+        """Explicitly commit an approved invoice to the cumulative ledger.
+        
+        Properly maps invoice lines to authorized PO lines to prevent index corruption.
+        """
+        self.ledger.record_invoice(invoice)
+        if po:
+            lines_map = matched_lines_map or {}
+            for line in invoice.lines:
+                # Map to matched PO line number, fallback to line.line_number
+                po_line_num = lines_map.get(line.line_number, line.line_number)
+                self.ledger.record_po_billing(po.po_number, po_line_num, line.quantity)

@@ -1,16 +1,16 @@
 """Synthetic Procurement Dataset Generator.
 
-Inspired by `invoice-agent generate-dataset`.
 Generates coordinated test sets:
   - Invoice PDFs (created natively using PyMuPDF)
   - Authorized Purchase Orders (JSON)
   - Warehouse Goods Receipts (JSON)
   - Vendor Contracts / MSAs (JSON)
   - Labeled Ground Truth for evaluation (JSON)
+  - Downloadable ZIP archive containing all sample documents
 
 Seeds the 5 most common discrepancy scenarios:
   1. Clean 3-Way Match (Auto-Approve baseline)
-  2. Unit Price Variance ($35.00 billed vs $25.00 authorized)
+  2. Unit Price Variance ($750.00 billed vs $600.00 authorized)
   3. Missing Required Fields / Extraction Incomplete (Human-In-The-Loop trigger)
   4. Cumulative Quantity Overbilling across multi-part invoices
   5. Unauthorized Stealth Surcharges violating Contract Clause
@@ -20,6 +20,7 @@ import json
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
+import zipfile
 import pymupdf
 
 
@@ -27,6 +28,8 @@ def draw_invoice_pdf(
     out_path: Path,
     invoice_number: str,
     vendor: str,
+    vendor_address: str,
+    date: str,
     po_number: str,
     lines: List[Dict[str, Any]],
     subtotal: Decimal,
@@ -42,21 +45,22 @@ def draw_invoice_pdf(
     # Header section
     y = 50
     page.insert_text((50, y), "COMMERCIAL INVOICE", fontsize=18, color=(0.1, 0.2, 0.5))
-    y += 30
+    y += 28
 
     if not omit_fields:
         page.insert_text((50, y), f"Vendor: {vendor}", fontsize=11, color=(0, 0, 0))
         page.insert_text((350, y), f"Invoice #: {invoice_number}", fontsize=11, color=(0, 0, 0))
-        y += 18
-        page.insert_text((50, y), "Date: 2026-10-25", fontsize=10, color=(0.3, 0.3, 0.3))
-        page.insert_text((350, y), f"PO Number: {po_number}", fontsize=10, color=(0.3, 0.3, 0.3))
-        y += 18
+        y += 16
+        page.insert_text((50, y), f"Address: {vendor_address}", fontsize=9, color=(0.3, 0.3, 0.3))
+        page.insert_text((350, y), f"Date: {date}", fontsize=10, color=(0.3, 0.3, 0.3))
+        y += 16
         page.insert_text((50, y), "Currency: USD", fontsize=10, color=(0.3, 0.3, 0.3))
+        page.insert_text((350, y), f"PO Number: {po_number}", fontsize=10, color=(0.3, 0.3, 0.3))
     else:
         # Deliberately omit required fields to trigger Human-in-the-Loop review
         page.insert_text((50, y), "Notice: Vendor copy - Incomplete Header", fontsize=10, color=(0.5, 0.1, 0.1))
 
-    y += 35
+    y += 32
     page.draw_line((50, y), (545, y), color=(0.8, 0.8, 0.8), width=1)
     y += 20
 
@@ -106,19 +110,66 @@ def draw_invoice_pdf(
     doc.close()
 
 
+def create_sample_zip(data_dir: Path) -> Path:
+    """Package all sample procurement benchmark files into a downloadable ZIP archive."""
+    zip_path = data_dir / "sample_procurement_documents.zip"
+    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        # 1. Invoice PDFs
+        pdf_dir = data_dir / "invoices"
+        if pdf_dir.exists():
+            for pdf_file in sorted(pdf_dir.glob("*.pdf")):
+                zf.write(pdf_file, arcname=f"invoices/{pdf_file.name}")
+        # 2. Master JSON datasets
+        for fname in ["purchase_orders.json", "goods_receipts.json", "contracts.json", "manifest.json"]:
+            fpath = data_dir / fname
+            if fpath.exists():
+                zf.write(fpath, arcname=fname)
+        # 3. Ground truth evaluation labels
+        gt_dir = data_dir / "ground_truth"
+        if gt_dir.exists():
+            for gt_file in sorted(gt_dir.glob("*.json")):
+                zf.write(gt_file, arcname=f"ground_truth/{gt_file.name}")
+        # 4. Instructions Readme
+        readme_text = (
+            "===========================================================\n"
+            "PROCUREMENT INVOICE & CONTRACT AUDITOR - SAMPLE DOCUMENTS\n"
+            "===========================================================\n\n"
+            "This archive contains verified procurement benchmark documents with\n"
+            "proper chronological date sequences, physical addresses, and ground truth labels:\n\n"
+            "1. invoices/\n"
+            "   - INV-101_Clean_Approved.pdf: Clean 3-way match against PO-2026-001\n"
+            "   - INV-102_Price_Variance.pdf: Unit price drift from $600 to $750 (PO-2026-002)\n"
+            "   - INV-103_Missing_Fields_HITL.pdf: Scanned / missing header fields triggering HITL\n"
+            "   - INV-105_Contract_Violation_Surcharge.pdf: Banned freight fee violation (PO-2026-001)\n\n"
+            "2. purchase_orders.json:\n"
+            "   - Master authorized Purchase Orders with vendor addresses and issuance dates\n\n"
+            "3. goods_receipts.json:\n"
+            "   - Warehouse physical receipt proofs with delivery dates\n\n"
+            "4. contracts.json:\n"
+            "   - Master Service Agreement (MSA) legal clauses indexed for Vector RAG\n\n"
+            "5. ground_truth/:\n"
+            "   - Expected decisions and reason codes for deterministic benchmark validation\n\n"
+            "To audit, upload any PDF in the Cockpit or use POST /api/audit/pdf\n"
+        )
+        zf.writestr("README.txt", readme_text)
+    return zip_path
+
+
 def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
-    """Generate complete synthetic dataset with seeded discrepancies and ground-truth labels."""
+    """Generate complete synthetic dataset with seeded discrepancies, proper dates, and ground-truth."""
     output_dir.mkdir(parents=True, exist_ok=True)
     pdf_dir = output_dir / "invoices"
     pdf_dir.mkdir(parents=True, exist_ok=True)
     gt_dir = output_dir / "ground_truth"
     gt_dir.mkdir(parents=True, exist_ok=True)
 
-    # 1. Standard Master Purchase Orders
+    # 1. Standard Master Purchase Orders with Proper Issuance Dates and Addresses
     purchase_orders = [
         {
             "po_number": "PO-2026-001",
             "vendor": "Apex Industrial Supply",
+            "vendor_address": "100 Industrial Parkway, Suite 400, Chicago, IL 60601",
+            "date": "2026-10-10",
             "currency": "USD",
             "receipt_required": True,
             "max_tolerated_price_variance": "0.00",
@@ -130,6 +181,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         {
             "po_number": "PO-2026-002",
             "vendor": "Nexus Cloud Hardware",
+            "vendor_address": "750 Innovation Way, Austin, TX 78701",
+            "date": "2026-10-12",
             "currency": "USD",
             "receipt_required": True,
             "max_tolerated_price_variance": "0.00",
@@ -140,6 +193,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         {
             "po_number": "PO-2026-003",
             "vendor": "Vanguard Logistics & Parts",
+            "vendor_address": "520 Commerce Blvd, Atlanta, GA 30303",
+            "date": "2026-10-14",
             "currency": "USD",
             "receipt_required": True,
             "max_tolerated_price_variance": "0.00",
@@ -149,12 +204,12 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         },
     ]
 
-    # 2. Master Goods Receipts
+    # 2. Master Goods Receipts (Chronologically after PO issuance)
     goods_receipts = [
         {
             "receipt_id": "GR-2026-001",
             "po_number": "PO-2026-001",
-            "receipt_date": "2026-10-24",
+            "receipt_date": "2026-10-18",
             "lines": [
                 {"line_number": 1, "sku": "SKU-BALL-VALVE", "quantity_received": "10.0"},
                 {"line_number": 2, "sku": "SKU-SEAL-KIT", "quantity_received": "20.0"},
@@ -163,7 +218,7 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         {
             "receipt_id": "GR-2026-002",
             "po_number": "PO-2026-002",
-            "receipt_date": "2026-10-24",
+            "receipt_date": "2026-10-19",
             "lines": [
                 {"line_number": 1, "sku": "SKU-SERVER-RACK", "quantity_received": "4.0"},
             ],
@@ -171,14 +226,14 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         {
             "receipt_id": "GR-2026-003",
             "po_number": "PO-2026-003",
-            "receipt_date": "2026-10-24",
+            "receipt_date": "2026-10-20",
             "lines": [
                 {"line_number": 1, "sku": "SKU-STEEL-BRACKET", "quantity_received": "100.0"},
             ],
         },
     ]
 
-    # 3. Master Contract Clauses
+    # 3. Master Contract Clauses (Effective prior to POs)
     contract_clauses = [
         {
             "clause_id": "MSA-APEX-SEC-4.2",
@@ -202,13 +257,15 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
         },
     ]
 
-    # 4. Generate 5 Benchmark Invoices
+    # 4. Benchmark Invoices (Chronologically after Goods Receipt)
     scenarios = [
         # 1. Clean Auto-Approve Baseline
         {
             "id": "INV-101",
             "pdf_name": "INV-101_Clean_Approved.pdf",
             "vendor": "Apex Industrial Supply",
+            "vendor_address": "100 Industrial Parkway, Suite 400, Chicago, IL 60601",
+            "date": "2026-10-22",
             "po": "PO-2026-001",
             "lines": [
                 {"line": 1, "desc": "Precision Ball Valve 2in", "qty": Decimal("10.0"), "price": Decimal("50.00"), "total": Decimal("500.00")},
@@ -228,6 +285,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
             "id": "INV-102",
             "pdf_name": "INV-102_Price_Variance.pdf",
             "vendor": "Nexus Cloud Hardware",
+            "vendor_address": "750 Innovation Way, Austin, TX 78701",
+            "date": "2026-10-23",
             "po": "PO-2026-002",
             "lines": [
                 {"line": 1, "desc": "42U Server Rack Cabinet", "qty": Decimal("4.0"), "price": Decimal("750.00"), "total": Decimal("3000.00")},  # PO was $600
@@ -246,6 +305,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
             "id": "INV-103",
             "pdf_name": "INV-103_Missing_Fields_HITL.pdf",
             "vendor": "Unknown Supplier",
+            "vendor_address": "",
+            "date": "",
             "po": "PO-2026-001",
             "lines": [],
             "subtotal": Decimal("0.00"),
@@ -262,6 +323,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
             "id": "INV-105",
             "pdf_name": "INV-105_Contract_Violation_Surcharge.pdf",
             "vendor": "Apex Industrial Supply",
+            "vendor_address": "100 Industrial Parkway, Suite 400, Chicago, IL 60601",
+            "date": "2026-10-22",
             "po": "PO-2026-001",
             "lines": [
                 {"line": 1, "desc": "Precision Ball Valve 2in", "qty": Decimal("10.0"), "price": Decimal("50.00"), "total": Decimal("500.00")},
@@ -285,6 +348,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
             out_path=pdf_path,
             invoice_number=sc["id"],
             vendor=sc["vendor"],
+            vendor_address=sc.get("vendor_address", ""),
+            date=sc.get("date", ""),
             po_number=sc["po"],
             lines=sc["lines"],
             subtotal=sc["subtotal"],
@@ -331,5 +396,8 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
     }
     with open(output_dir / "manifest.json", "w", encoding="utf-8") as f:
         json.dump(manifest, f, indent=2)
+
+    # Package everything into downloadable ZIP
+    create_sample_zip(output_dir)
 
     return manifest

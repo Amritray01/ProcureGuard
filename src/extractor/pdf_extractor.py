@@ -1,6 +1,8 @@
-"""Dynamic PDF Extractor combining PyMuPDF text reconstruction with LLM understanding.
+"""Dynamic PDF Extractor combining PyMuPDF visual line reconstruction with LLM understanding.
 
-Handles custom, arbitrary PDF invoice layouts without hardcoding.
+Handles custom, arbitrary PDF invoice layouts.
+If LLM API is available, uses Pydantic structured extraction.
+If offline, uses visual horizontal coordinate line parser.
 Explicitly detects scanned PDFs (no text layer) and missing required fields,
 triggering Human-in-the-Loop review.
 """
@@ -8,7 +10,8 @@ triggering Human-in-the-Loop review.
 from collections import defaultdict
 from decimal import Decimal
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+import re
+from typing import Any, Dict, List, Optional, Tuple, Union
 import pymupdf
 
 from src.core.schema import Invoice, LineItem, Reason, ReasonCode, Severity
@@ -78,10 +81,17 @@ class PDFExtractor:
 
         reconstructed_text = "\n".join(all_lines)
 
-        # Dynamic Extraction via LLM (with fallback to semantic lowercase parser)
-        extracted = llm_client.extract_invoice_dynamic(reconstructed_text)
+        # 1. Try Dynamic Extraction via LLM Structured Output if configured
+        if llm_client.has_api_key():
+            extracted = llm_client.extract_invoice_dynamic(reconstructed_text)
+            if extracted and extracted.get("lines"):
+                return self._build_invoice_from_dict(extracted), reasons
 
-        # Build clean Pydantic model
+        # 2. Robust visual line parsing fallback
+        invoice = self._parse_lines(all_lines, reconstructed_text)
+        return invoice, reasons
+
+    def _build_invoice_from_dict(self, extracted: Dict[str, Any]) -> Invoice:
         line_items: List[LineItem] = []
         for raw_line in extracted.get("lines", []):
             try:
@@ -132,9 +142,11 @@ class PDFExtractor:
             except Exception:
                 return None
 
-        invoice = Invoice(
+        return Invoice(
             invoice_number=inv_num,
             vendor=vendor,
+            vendor_address=extracted.get("vendor_address"),
+            date=extracted.get("date"),
             po_number=po_num,
             currency=extracted.get("currency", "USD"),
             lines=line_items,
@@ -146,4 +158,129 @@ class PDFExtractor:
             missing_fields=missing,
         )
 
-        return invoice, reasons
+    def _parse_lines(self, lines: List[str], full_text: str) -> Invoice:
+        missing: List[str] = []
+
+        # 1. Invoice Number
+        inv_match = re.search(r"(?:invoice\s*(?:#|no\.?|num(?:ber)?)|inv#)\s*[:\s]*([A-Za-z0-9\-_]+)", full_text, re.IGNORECASE)
+        inv_number = inv_match.group(1).strip() if inv_match else None
+        if not inv_number:
+            missing.append("invoice_number")
+
+        # 2. PO Number
+        po_match = re.search(r"(?:p\.?o\.?\s*(?:#|no\.?|num(?:ber)?)|purchase\s*order\s*#?)\s*[:\s]*([A-Za-z0-9\-_]+)", full_text, re.IGNORECASE)
+        po_number = po_match.group(1).strip() if po_match else None
+        if not po_number:
+            missing.append("po_number")
+
+        # 3. Vendor
+        vendor_match = re.search(r"(?:vendor|supplier|from|billed\s*by)\s*[:\s]*([A-Za-z0-9\s,\.&]+?)(?:\s+invoice|\s+date|\n|$)", full_text, re.IGNORECASE)
+        vendor = vendor_match.group(1).strip() if vendor_match else None
+        if not vendor:
+            for l in lines[:3]:
+                if not re.search(r"(commercial|invoice|date|order|tax)", l, re.IGNORECASE) and len(l) > 3:
+                    vendor = l.strip()
+                    break
+        if not vendor:
+            missing.append("vendor")
+
+        # 4. Currency
+        currency = "USD"
+        if "EUR" in full_text or "€" in full_text:
+            currency = "EUR"
+        elif "GBP" in full_text or "£" in full_text:
+            currency = "GBP"
+
+        # 5. Financial totals
+        def extract_amount(patterns: List[str]) -> Optional[Decimal]:
+            for p in patterns:
+                m = re.search(p, full_text, re.IGNORECASE)
+                if m:
+                    try:
+                        clean_num = m.group(1).replace(",", "").replace("$", "").replace("€", "").replace("£", "").strip()
+                        return Decimal(clean_num)
+                    except Exception:
+                        continue
+            return None
+
+        subtotal = extract_amount([
+            r"sub\s*total\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+            r"subtotal\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+        ])
+
+        tax = extract_amount([
+            r"(?:tax|sales\s*tax|vat)(?:\s*\([^\)]*\))?\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+        ]) or Decimal("0.00")
+
+        discount = extract_amount([
+            r"(?:discount|credit)\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+        ]) or Decimal("0.00")
+
+        freight = extract_amount([
+            r"(?:freight|shipping|handling|fuel\s*surcharge|surcharges?)\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+        ]) or Decimal("0.00")
+
+        total = extract_amount([
+            r"(?:total\s*due|grand\s*total|amount\s*due)\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+            r"(?<!sub)\btotal\b\s*[:\s]*\$?([0-9,]+\.[0-9]{2})",
+        ])
+        if total is None:
+            missing.append("total_amount")
+
+        # 6. Date & Address
+        date_match = re.search(r"(?:date|invoice\s*date)\s*[:\s]*([0-9]{4}[-/][0-9]{1,2}[-/][0-9]{1,2}|[A-Za-z]+\s+\d{1,2},?\s+\d{4})", full_text, re.IGNORECASE)
+        date_str = date_match.group(1).strip() if date_match else None
+
+        addr_match = re.search(r"(?:address|addr)\s*[:\s]*([^\n]+)", full_text, re.IGNORECASE)
+        vendor_address = addr_match.group(1).strip() if addr_match else None
+
+        # 7. Extract Line Items from reconstructed visual rows
+        extracted_lines: List[LineItem] = []
+        line_item_regex = re.compile(
+            r"^\s*(?:(\d{1,3})\s+)?([A-Za-z0-9\-_\s]{3,40})\s+(\d+(?:\.\d+)?)\s+\$?([0-9,]+\.[0-9]{2})\s+\$?([0-9,]+\.[0-9]{2})",
+            re.IGNORECASE,
+        )
+
+        line_counter = 1
+        for row in lines:
+            m = line_item_regex.match(row)
+            if m:
+                desc = m.group(2).strip()
+                if any(k in desc.lower() for k in ["description", "subtotal", "total", "amount", "unit price", "tax", "freight"]):
+                    continue
+                try:
+                    l_num = int(m.group(1)) if m.group(1) else line_counter
+                    qty = Decimal(m.group(3))
+                    price = Decimal(m.group(4).replace(",", ""))
+                    ltotal = Decimal(m.group(5).replace(",", ""))
+                    extracted_lines.append(
+                        LineItem(
+                            line_number=l_num,
+                            description=desc,
+                            quantity=qty,
+                            unit_price=price,
+                            line_total=ltotal,
+                        )
+                    )
+                    line_counter += 1
+                except Exception:
+                    continue
+
+        if not extracted_lines:
+            missing.append("line_items")
+
+        return Invoice(
+            invoice_number=inv_number,
+            vendor=vendor,
+            vendor_address=vendor_address,
+            date=date_str,
+            po_number=po_number,
+            currency=currency,
+            lines=extracted_lines,
+            subtotal=subtotal,
+            tax=tax,
+            discount=discount,
+            freight_surcharges=freight,
+            total=total,
+            missing_fields=missing,
+        )

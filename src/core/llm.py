@@ -1,24 +1,19 @@
-"""Dynamic LLM Integration Layer with Graceful Fallback.
+"""Dynamic LLM Integration Layer supporting OpenAI, Google Gemini, and Local Fallback.
 
-Supports OpenAI, Google Gemini, Anthropic, or Local/Ollama endpoints.
-When an API key is available, uses the LLM for:
-  - Dynamic invoice parsing from unstructured/custom PDF text
-  - Contract clause compliance analysis (interpreting legal nuances)
-  - Natural-language investigation summaries and evidence correlation
-
-When offline or if no API key is provided, provides a robust local semantic fallback
-that lowercases text and executes deterministic comparison without crashing.
+Leverages Pydantic structured output models with explicit field descriptions to enforce
+well-formed JSON schemas for invoice extraction and contract clause analysis.
 """
 
 from decimal import Decimal
 import json
 import os
-import re
 from typing import Any, Dict, List, Optional
+
+from src.core.schema import ContractClauseAnalysisSchema, InvoiceExtractionSchema
 
 
 class LLMClient:
-    """Dynamic LLM provider with fallback handling."""
+    """Dynamic multi-provider LLM client with structured Pydantic format enforcement."""
 
     def __init__(self) -> None:
         self.openai_key = os.getenv("OPENAI_API_KEY")
@@ -34,16 +29,19 @@ class LLMClient:
         return self.provider != "none"
 
     def extract_invoice_dynamic(self, raw_text: str) -> Dict[str, Any]:
-        """Dynamically extract structured invoice data from custom, arbitrary text formats."""
+        """Dynamically extract structured invoice data using LLM structured output.
+        
+        Uses Pydantic InvoiceExtractionSchema to determine the exact structured format.
+        """
+        # 1. OpenAI Path
         if self.provider == "openai" and self.openai_key:
             try:
                 from openai import OpenAI
                 client = OpenAI(api_key=self.openai_key)
+                schema_json = json.dumps(InvoiceExtractionSchema.model_json_schema(), indent=2)
                 prompt = (
-                    "Extract structured invoice fields from this raw text into valid JSON with keys: "
-                    "'invoice_number', 'vendor', 'po_number', 'date', 'currency', 'lines' (list of {line_number, description, quantity, unit_price, line_total}), "
-                    "'subtotal', 'tax', 'discount', 'freight_surcharges', 'total'. "
-                    "Only return valid JSON.\n\n"
+                    "Extract structured invoice fields from the document text into valid JSON matching this schema:\n"
+                    f"{schema_json}\n\n"
                     f"Document Text:\n{raw_text[:4000]}"
                 )
                 resp = client.chat.completions.create(
@@ -52,12 +50,33 @@ class LLMClient:
                     response_format={"type": "json_object"},
                     temperature=0.0,
                 )
-                return json.loads(resp.choices[0].message.content or "{}")
+                parsed = json.loads(resp.choices[0].message.content or "{}")
+                # Validate against schema
+                validated = InvoiceExtractionSchema(**parsed)
+                return validated.model_dump()
             except Exception as e:
-                print(f"[LLM Warning] OpenAI extraction error: {e}. Falling back to local parser.")
+                print(f"[LLM Warning] OpenAI extraction error: {e}. Falling back to visual extractor.")
 
-        # Robust Fallback parser: lowercases and extracts dynamically
-        return self._local_dynamic_extract(raw_text)
+        # 2. Google Gemini Path
+        if self.provider == "gemini" and self.gemini_key:
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    google_api_key=self.gemini_key,
+                    temperature=0.0,
+                )
+                structured_llm = llm.with_structured_output(InvoiceExtractionSchema)
+                result = structured_llm.invoke(f"Extract invoice data from text:\n{raw_text[:4000]}")
+                if isinstance(result, InvoiceExtractionSchema):
+                    return result.model_dump()
+                elif isinstance(result, dict):
+                    return result
+            except Exception as e:
+                print(f"[LLM Warning] Gemini extraction error: {e}. Falling back to visual extractor.")
+
+        # Return empty dict when offline so pdf_extractor handles parsing directly without duplicate code
+        return {}
 
     def analyze_contract_clause(
         self,
@@ -65,17 +84,19 @@ class LLMClient:
         clause_text: str,
         surcharge_amount: Decimal,
     ) -> Dict[str, Any]:
-        """Use LLM to determine if an invoice charge violates a specific contract clause."""
+        """Evaluate contract clause compliance using structured Pydantic output."""
+        # 1. OpenAI Path
         if self.provider == "openai" and self.openai_key:
             try:
                 from openai import OpenAI
                 client = OpenAI(api_key=self.openai_key)
+                schema_json = json.dumps(ContractClauseAnalysisSchema.model_json_schema(), indent=2)
                 prompt = (
-                    "You are a procurement contract legal auditor. Analyze whether the following invoice charge violates the contract clause.\n"
+                    "Analyze whether the invoice charge violates the contract clause. "
+                    f"Respond with JSON matching this schema:\n{schema_json}\n\n"
                     f"Contract Clause:\n{clause_text}\n\n"
                     f"Invoice Context:\n{invoice_summary}\n\n"
-                    f"Charge in question: ${surcharge_amount}\n\n"
-                    "Respond with JSON format: {\"is_violation\": boolean, \"explanation\": string, \"severity\": \"reject\" | \"review\" | \"info\"}"
+                    f"Charge in question: ${surcharge_amount}"
                 )
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
@@ -83,18 +104,38 @@ class LLMClient:
                     response_format={"type": "json_object"},
                     temperature=0.0,
                 )
-                return json.loads(resp.choices[0].message.content or "{}")
+                parsed = json.loads(resp.choices[0].message.content or "{}")
+                validated = ContractClauseAnalysisSchema(**parsed)
+                return validated.model_dump()
             except Exception as e:
-                print(f"[LLM Warning] Contract analysis error: {e}. Falling back to local reasoning.")
+                print(f"[LLM Warning] OpenAI contract analysis error: {e}. Falling back to semantic analyzer.")
 
-        # Local semantic fallback: converts text to lowercase and analyzes terms
+        # 2. Google Gemini Path
+        if self.provider == "gemini" and self.gemini_key:
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    google_api_key=self.gemini_key,
+                    temperature=0.0,
+                )
+                structured_llm = llm.with_structured_output(ContractClauseAnalysisSchema)
+                prompt = (
+                    f"Evaluate contract compliance for this invoice.\n"
+                    f"Clause:\n{clause_text}\n\n"
+                    f"Invoice: {invoice_summary}\n"
+                    f"Charge: ${surcharge_amount}"
+                )
+                result = structured_llm.invoke(prompt)
+                if isinstance(result, ContractClauseAnalysisSchema):
+                    return result.model_dump()
+                elif isinstance(result, dict):
+                    return result
+            except Exception as e:
+                print(f"[LLM Warning] Gemini contract analysis error: {e}. Falling back to semantic analyzer.")
+
+        # Robust semantic fallback: lowercases text and inspects terms
         clause_lower = clause_text.lower()
-        inv_lower = invoice_summary.lower()
-
-        is_violation = False
-        explanation = "Contract clause reviewed."
-        severity = "info"
-
         prohibition_terms = ["not bill", "shall not", "prohibit", "prohibited", "included", "no separate", "forbidden", "fixed"]
         surcharge_terms = ["freight", "fuel", "surcharge", "handling", "delivery fee", "shipping"]
 
@@ -102,20 +143,17 @@ class LLMClient:
         has_surcharge_mention = any(s in clause_lower for s in surcharge_terms)
 
         if surcharge_amount > Decimal("0.00") and has_prohibition and has_surcharge_mention:
-            is_violation = True
-            severity = "reject"
-            explanation = (
-                f"Contract prohibits separate freight/fuel charges. "
-                f"The invoice billed ${surcharge_amount} in unauthorized surcharges."
-            )
-        else:
-            explanation = "No explicit contractual clause violation detected for this line item."
+            return ContractClauseAnalysisSchema(
+                is_violation=True,
+                severity="reject",
+                explanation=f"Contract prohibits separate freight/fuel charges. The invoice billed ${surcharge_amount} in unauthorized surcharges.",
+            ).model_dump()
 
-        return {
-            "is_violation": is_violation,
-            "explanation": explanation,
-            "severity": severity,
-        }
+        return ContractClauseAnalysisSchema(
+            is_violation=False,
+            severity="info",
+            explanation="No explicit contractual clause violation detected for this line item.",
+        ).model_dump()
 
     def chat_reply(
         self,
@@ -124,21 +162,23 @@ class LLMClient:
         contract_context: str,
     ) -> str:
         """Conversational copilot answering auditor queries."""
+        system_prompt = (
+            "You are an expert Procurement Invoice & Contract Auditor Copilot. "
+            "Answer user questions accurately based strictly on the provided invoice audit context, "
+            "ERP purchase orders, goods receipts, and contract clauses. "
+            "Be concise, professional, and reference specific line numbers or clause sections."
+        )
+        user_content = (
+            f"Active Invoice & Audit Context:\n{invoice_context}\n\n"
+            f"Contract Clauses Retrieved:\n{contract_context}\n\n"
+            f"User Question:\n{query}"
+        )
+
+        # 1. OpenAI Path
         if self.provider == "openai" and self.openai_key:
             try:
                 from openai import OpenAI
                 client = OpenAI(api_key=self.openai_key)
-                system_prompt = (
-                    "You are an expert Procurement Invoice & Contract Auditor Copilot. "
-                    "Answer user questions accurately based strictly on the provided invoice audit context, "
-                    "ERP purchase orders, goods receipts, and contract clauses. "
-                    "Be concise, professional, and reference specific line numbers or clause sections."
-                )
-                user_content = (
-                    f"Active Invoice & Audit Context:\n{invoice_context}\n\n"
-                    f"Contract Clauses Retrieved:\n{contract_context}\n\n"
-                    f"User Question:\n{query}"
-                )
                 resp = client.chat.completions.create(
                     model="gpt-4o-mini",
                     messages=[
@@ -149,9 +189,23 @@ class LLMClient:
                 )
                 return resp.choices[0].message.content or ""
             except Exception as e:
-                print(f"[LLM Warning] Chatbot completion error: {e}. Falling back to local reasoning.")
+                print(f"[LLM Warning] Chatbot completion error: {e}. Falling back to semantic reply.")
 
-        # Smart rule-based conversational fallback
+        # 2. Google Gemini Path
+        if self.provider == "gemini" and self.gemini_key:
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                llm = ChatGoogleGenerativeAI(
+                    model="gemini-1.5-flash",
+                    google_api_key=self.gemini_key,
+                    temperature=0.2,
+                )
+                resp = llm.invoke(f"{system_prompt}\n\n{user_content}")
+                return str(resp.content) if hasattr(resp, "content") else str(resp)
+            except Exception as e:
+                print(f"[LLM Warning] Gemini chat error: {e}. Falling back to semantic reply.")
+
+        # Conversational fallback
         q_lower = query.lower()
         if "why" in q_lower:
             return (
@@ -167,90 +221,6 @@ class LLMClient:
             f"Audit Copilot Status: Context loaded for active invoice. "
             f"You can ask why it was flagged, query contract clauses, or verify warehouse receipt quantities."
         )
-
-    def _local_dynamic_extract(self, text: str) -> Dict[str, Any]:
-        """Deterministic fallback extractor converting text to lower and matching patterns."""
-        text_lower = text.lower()
-        lines = [l.strip() for l in text.split("\n") if l.strip()]
-
-        data: Dict[str, Any] = {
-            "invoice_number": None,
-            "vendor": None,
-            "po_number": None,
-            "date": None,
-            "currency": "USD",
-            "lines": [],
-            "subtotal": None,
-            "tax": "0.00",
-            "discount": "0.00",
-            "freight_surcharges": "0.00",
-            "total": None,
-        }
-
-        # 1. Invoice Number
-        m_inv = re.search(r"(?:invoice\s*(?:#|no\.?|num(?:ber)?)|inv#)\s*[:\s]*([a-z0-9\-_]+)", text_lower)
-        if m_inv:
-            data["invoice_number"] = m_inv.group(1).upper()
-
-        # 2. PO Number
-        m_po = re.search(r"(?:p\.?o\.?\s*(?:#|no\.?|num(?:ber)?)|purchase\s*order\s*#?)\s*[:\s]*([a-z0-9\-_]+)", text_lower)
-        if m_po:
-            data["po_number"] = m_po.group(1).upper()
-
-        # 3. Vendor
-        m_v = re.search(r"(?:vendor|supplier|from|billed\s*by)\s*[:\s]*([a-z0-9\s,\.&]+?)(?:\s+invoice|\s+date|\n|$)", text, re.I)
-        if m_v:
-            data["vendor"] = m_v.group(1).strip()
-        elif lines:
-            for l in lines[:3]:
-                if not any(k in l.lower() for k in ["commercial", "invoice", "date", "order", "tax", "total"]):
-                    data["vendor"] = l.strip()
-                    break
-
-        # 4. Currency
-        if "eur" in text_lower or "€" in text:
-            data["currency"] = "EUR"
-        elif "gbp" in text_lower or "£" in text:
-            data["currency"] = "GBP"
-
-        # 5. Extract Amounts
-        def find_amt(patterns: List[str]) -> Optional[str]:
-            for p in patterns:
-                m = re.search(p, text_lower)
-                if m:
-                    return m.group(1).replace(",", "")
-            return None
-
-        data["subtotal"] = find_amt([r"sub\s*total\s*[:\s]*\$?([0-9,]+\.[0-9]{2})", r"subtotal\s*[:\s]*\$?([0-9,]+\.[0-9]{2})"])
-        data["tax"] = find_amt([r"(?:tax|sales\s*tax|vat)(?:\s*\([^\)]*\))?\s*[:\s]*\$?([0-9,]+\.[0-9]{2})"]) or "0.00"
-        data["freight_surcharges"] = find_amt([r"(?:freight|shipping|handling|fuel\s*surcharge|surcharges?)\s*[:\s]*\$?([0-9,]+\.[0-9]{2})"]) or "0.00"
-        data["total"] = find_amt([r"(?:total\s*due|grand\s*total|amount\s*due)\s*[:\s]*\$?([0-9,]+\.[0-9]{2})", r"(?<!sub)\btotal\b\s*[:\s]*\$?([0-9,]+\.[0-9]{2})"])
-
-        # 6. Extract Line Items
-        line_item_regex = re.compile(
-            r"^\s*(?:(\d{1,3})\s+)?([A-Za-z0-9\-_\s]{3,40})\s+(\d+(?:\.\d+)?)\s+\$?([0-9,]+\.[0-9]{2})\s+\$?([0-9,]+\.[0-9]{2})",
-            re.IGNORECASE,
-        )
-        line_idx = 1
-        for row in lines:
-            m = line_item_regex.match(row)
-            if m:
-                desc = m.group(2).strip()
-                if any(k in desc.lower() for k in ["description", "subtotal", "total", "amount", "unit price", "tax", "freight"]):
-                    continue
-                try:
-                    data["lines"].append({
-                        "line_number": int(m.group(1)) if m.group(1) else line_idx,
-                        "description": desc,
-                        "quantity": m.group(3),
-                        "unit_price": m.group(4).replace(",", ""),
-                        "line_total": m.group(5).replace(",", ""),
-                    })
-                    line_idx += 1
-                except Exception:
-                    continue
-
-        return data
 
 
 # Global singleton LLM client

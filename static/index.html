@@ -560,7 +560,8 @@
     </div>
 
     <div class="header-actions">
-      <button class="btn btn-outline" id="btn-re-synth">⚡ Generate Dataset</button>
+      <a href="/api/samples/download-zip" class="btn btn-outline" download style="text-decoration: none;">📥 Download Sample Pack (.zip)</a>
+      <button class="btn btn-outline" id="btn-load-samples">📦 Load Benchmark Samples</button>
       <input type="file" id="pdf-upload-input" accept=".pdf" style="display: none;">
       <button class="btn btn-primary" id="btn-upload">📄 Upload PDF Invoice</button>
     </div>
@@ -569,21 +570,24 @@
   <!-- VIEW 1: Main 3-Column Audit Cockpit -->
   <main class="dashboard-container view-panel active" id="view-audit">
     
-    <!-- Left Column: Synthetic Test Samples -->
+    <!-- Left Column: Uploaded Documents & Benchmark Samples -->
     <div class="card">
       <div class="card-header">
-        <span class="card-title">📑 Benchmark Invoices</span>
-        <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;">Suite</span>
+        <span class="card-title">📑 Documents Queue</span>
+        <span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8;" id="doc-queue-badge">0 Loaded</span>
       </div>
 
       <!-- Quick Drag & Drop Upload Zone -->
       <div class="dropzone" id="quick-dropzone" onclick="document.getElementById('pdf-upload-input').click()">
-        <p style="font-weight: 500; font-size: 0.85rem; color: #a5b4fc;">Drag & Drop or Click to Upload PDF</p>
-        <p style="font-size: 0.72rem; color: var(--text-muted); margin-top: 4px;">Processing begins immediately upon upload</p>
+        <p style="font-weight: 600; font-size: 0.88rem; color: #a5b4fc;">📂 Upload Invoice PDF</p>
+        <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Click or drag & drop PDF here to audit</p>
       </div>
 
       <div class="sample-list" id="sample-list">
-        <div class="empty-state">Loading samples...</div>
+        <div class="empty-state" style="padding: 24px 12px;">
+          <p style="font-size: 0.85rem; font-weight: 500; margin-bottom: 6px;">No documents loaded</p>
+          <p style="font-size: 0.75rem; color: var(--text-muted);">Please upload an invoice PDF above, or click 'Load Benchmark Samples' to test.</p>
+        </div>
       </div>
     </div>
 
@@ -591,13 +595,20 @@
     <div class="card" style="display: flex; flex-direction: column;">
       <div class="card-header">
         <span class="card-title">🔍 Multi-Agent Audit Cockpit</span>
-        <span id="active-inv-badge" class="badge badge-needs_review">Select Document</span>
+        <span id="active-inv-badge" class="badge badge-needs_review">Awaiting Document</span>
       </div>
 
       <div class="audit-body" id="audit-body">
-        <div class="empty-state">
-          <p style="font-size: 1.1rem; margin-bottom: 8px;">Select an invoice or upload any PDF bill</p>
-          <p style="font-size: 0.85rem;">The deterministic arithmetic engine, 3-way matcher, and LangGraph contract agent will audit the document.</p>
+        <div class="empty-state" style="padding: 60px 20px;">
+          <div style="font-size: 3rem; margin-bottom: 14px;">📄</div>
+          <h3 style="font-size: 1.2rem; font-weight: 600; margin-bottom: 8px;">No Documents Audited Yet</h3>
+          <p style="font-size: 0.85rem; color: var(--text-muted); max-width: 440px; margin: 0 auto 18px; line-height: 1.5;">
+            Upload your invoice PDF to begin auditing. The system will extract line items, verify against authorized POs and Goods Receipts, and detect contractual discrepancies.
+          </p>
+          <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="document.getElementById('pdf-upload-input').click()">📄 Upload Invoice PDF</button>
+            <a href="/api/samples/download-zip" class="btn btn-outline" download style="text-decoration: none;">📥 Download Sample Pack (.zip)</a>
+          </div>
         </div>
       </div>
 
