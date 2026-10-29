@@ -1,0 +1,5 @@
+po_number,vendor,vendor_address,date,currency,receipt_required,line_number,sku,description,quantity,unit_price,tax_rate,max_tolerated_price_variance
+PO-2026-001,Apex Industrial Supply,"100 Industrial Parkway, Suite 400, Chicago, IL 60601",2026-10-10,USD,true,1,SKU-BALL-VALVE,Precision Ball Valve 2in,10,50.00,0.00,0.00
+PO-2026-001,Apex Industrial Supply,"100 Industrial Parkway, Suite 400, Chicago, IL 60601",2026-10-10,USD,true,2,SKU-SEAL-KIT,EPDM Gasket Seal Kit,20,15.00,0.00,0.00
+PO-2026-002,Nexus Cloud Hardware,"750 Innovation Way, Austin, TX 78701",2026-10-12,USD,true,1,SKU-SERVER-RACK,42U Server Rack Cabinet,4,600.00,0.00,0.00
+PO-2026-003,Vanguard Logistics & Parts,"520 Commerce Blvd, Atlanta, GA 30303",2026-10-14,USD,true,1,SKU-STEEL-BRACKET,Reinforced Steel Bracket,100,10.00,0.00,0.00

@@ -1,0 +1,43 @@
+[
+  {
+    "receipt_id": "GR-2026-001",
+    "po_number": "PO-2026-001",
+    "receipt_date": "2026-10-18",
+    "lines": [
+      {
+        "line_number": 1,
+        "sku": "SKU-BALL-VALVE",
+        "quantity_received": "10.0"
+      },
+      {
+        "line_number": 2,
+        "sku": "SKU-SEAL-KIT",
+        "quantity_received": "20.0"
+      }
+    ]
+  },
+  {
+    "receipt_id": "GR-2026-002",
+    "po_number": "PO-2026-002",
+    "receipt_date": "2026-10-19",
+    "lines": [
+      {
+        "line_number": 1,
+        "sku": "SKU-SERVER-RACK",
+        "quantity_received": "4.0"
+      }
+    ]
+  },
+  {
+    "receipt_id": "GR-2026-003",
+    "po_number": "PO-2026-003",
+    "receipt_date": "2026-10-20",
+    "lines": [
+      {
+        "line_number": 1,
+        "sku": "SKU-STEEL-BRACKET",
+        "quantity_received": "100.0"
+      }
+    ]
+  }
+]

@@ -1,0 +1,7 @@
+{
+  "invoice_id": "INV-101",
+  "expected_decision": "auto_approve",
+  "expected_reasons": [],
+  "description": "Clean 3-way match against PO and warehouse receipts.",
+  "ground_truth_total": "840.00"
+}

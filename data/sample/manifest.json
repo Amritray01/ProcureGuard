@@ -1,0 +1,34 @@
+{
+  "dataset_name": "procurement_benchmark_v1",
+  "invoices_count": 4,
+  "invoices": [
+    {
+      "id": "INV-101",
+      "file": "INV-101_Clean_Approved.pdf",
+      "vendor": "Apex Industrial Supply",
+      "po_number": "PO-2026-001",
+      "expected_decision": "auto_approve"
+    },
+    {
+      "id": "INV-102",
+      "file": "INV-102_Price_Variance.pdf",
+      "vendor": "Nexus Cloud Hardware",
+      "po_number": "PO-2026-002",
+      "expected_decision": "needs_review"
+    },
+    {
+      "id": "INV-103",
+      "file": "INV-103_Missing_Fields_HITL.pdf",
+      "vendor": "Unknown Supplier",
+      "po_number": "PO-2026-001",
+      "expected_decision": "needs_review"
+    },
+    {
+      "id": "INV-105",
+      "file": "INV-105_Contract_Violation_Surcharge.pdf",
+      "vendor": "Apex Industrial Supply",
+      "po_number": "PO-2026-001",
+      "expected_decision": "reject"
+    }
+  ]
+}

@@ -400,6 +400,11 @@ def generate_synthetic_dataset(output_dir: Path) -> Dict[str, Any]:
     with open(output_dir / "contracts.json", "w", encoding="utf-8") as f:
         json.dump(contract_clauses, f, indent=2)
 
+    from src.core.table_parser import export_contract_clauses_to_csv, parse_contract_clauses
+    c_objs = parse_contract_clauses(json.dumps(contract_clauses))
+    with open(output_dir / "contracts.csv", "w", encoding="utf-8") as f:
+        f.write(export_contract_clauses_to_csv(c_objs))
+
     manifest = {
         "dataset_name": "procurement_benchmark_v1",
         "invoices_count": len(scenarios),

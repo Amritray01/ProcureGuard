@@ -52,6 +52,22 @@ from src.core.table_parser import (
 
 DATA_DIR = Path("data")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
+SAMPLE_DIR = DATA_DIR / "sample"
+SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def get_sample_path(rel_path: str = "") -> Path:
+    """Return path inside data/sample/ if it exists, otherwise fallback to data/."""
+    if not rel_path:
+        return SAMPLE_DIR if SAMPLE_DIR.exists() else DATA_DIR
+    p_sample = SAMPLE_DIR / rel_path
+    if p_sample.exists():
+        return p_sample
+    p_data = DATA_DIR / rel_path
+    if p_data.exists():
+        return p_data
+    return p_sample
+
 MAX_FILE_SIZE_BYTES = 25 * 1024 * 1024  # 25 MB file cap
 MAX_INVOICE_COUNT = 25  # Max 25 invoices per batch
 
@@ -133,33 +149,37 @@ async def start_session_workflow(
 
     if use_sample_pack:
         # Load verified sample benchmark files into this session workspace
-        if not (DATA_DIR / "purchase_orders.csv").exists() and not (DATA_DIR / "purchase_orders.json").exists():
-            generate_synthetic_dataset(DATA_DIR)
+        if not get_sample_path("purchase_orders.csv").exists() and not get_sample_path("purchase_orders.json").exists():
+            generate_synthetic_dataset(SAMPLE_DIR)
 
         # Invoices (loaded directly into memory for isolated session persistence)
-        sample_pdf_dir = DATA_DIR / "invoices"
+        sample_pdf_dir = get_sample_path("invoices")
         if sample_pdf_dir.exists():
             for p_file in sorted(sample_pdf_dir.glob("*.pdf")):
                 invoice_files.append((p_file.name, p_file.read_bytes()))
 
         # Orders strictly loaded from CSV file format for sample docs
-        po_csv = DATA_DIR / "purchase_orders.csv"
+        po_csv = get_sample_path("purchase_orders.csv")
+        po_json = get_sample_path("purchase_orders.json")
         if po_csv.exists():
             session.purchase_orders = parse_purchase_orders(po_csv.read_bytes())
-        elif (DATA_DIR / "purchase_orders.json").exists():
-            session.purchase_orders = parse_purchase_orders((DATA_DIR / "purchase_orders.json").read_bytes())
+        elif po_json.exists():
+            session.purchase_orders = parse_purchase_orders(po_json.read_bytes())
 
         # Good Orders / Receipts strictly loaded from CSV file format for sample docs
-        gr_csv = DATA_DIR / "goods_receipts.csv"
+        gr_csv = get_sample_path("goods_receipts.csv")
+        gr_json = get_sample_path("goods_receipts.json")
         if gr_csv.exists():
             session.goods_receipts = parse_goods_receipts(gr_csv.read_bytes())
-        elif (DATA_DIR / "goods_receipts.json").exists():
-            session.goods_receipts = parse_goods_receipts((DATA_DIR / "goods_receipts.json").read_bytes())
+        elif gr_json.exists():
+            session.goods_receipts = parse_goods_receipts(gr_json.read_bytes())
 
         # Contracts loaded dynamically
-        if (DATA_DIR / "contracts.json").exists():
-            c_raw = (DATA_DIR / "contracts.json").read_bytes()
-            contracts_data = [c.model_dump() for c in parse_contract_clauses(c_raw)]
+        contract_file = get_sample_path("contracts.json")
+        if not contract_file.exists():
+            contract_file = get_sample_path("contracts.csv")
+        if contract_file.exists():
+            contracts_data = [c.model_dump() for c in parse_contract_clauses(contract_file.read_bytes())]
 
     else:
         # Process user-uploaded tabular and document files dynamically (name-independent)
@@ -393,9 +413,10 @@ async def auditor_chatbot(req: ChatRequest, session_id: Optional[str] = None):
 @app.get("/api/samples/download-zip")
 def download_sample_documents_zip():
     """Download ZIP archive containing sample benchmark documents."""
-    zip_path = DATA_DIR / "sample_procurement_documents.zip"
+    zip_path = get_sample_path("sample_procurement_documents.zip")
     if not zip_path.exists():
-        generate_synthetic_dataset(DATA_DIR)
+        generate_synthetic_dataset(SAMPLE_DIR)
+        zip_path = get_sample_path("sample_procurement_documents.zip")
     return FileResponse(
         path=str(zip_path),
         filename="sample_procurement_documents.zip",
@@ -406,9 +427,10 @@ def download_sample_documents_zip():
 @app.get("/api/dataset/samples")
 def get_sample_invoices():
     """List sample benchmark invoice labels."""
-    manifest_file = DATA_DIR / "manifest.json"
+    manifest_file = get_sample_path("manifest.json")
     if not manifest_file.exists():
-        generate_synthetic_dataset(DATA_DIR)
+        generate_synthetic_dataset(SAMPLE_DIR)
+        manifest_file = get_sample_path("manifest.json")
     with open(manifest_file, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -447,9 +469,10 @@ async def audit_sample_endpoint(invoice_id: str):
     if not session:
         session = session_manager.create_session()
 
-    manifest_file = DATA_DIR / "manifest.json"
+    manifest_file = get_sample_path("manifest.json")
     if not manifest_file.exists():
-        generate_synthetic_dataset(DATA_DIR)
+        generate_synthetic_dataset(SAMPLE_DIR)
+        manifest_file = get_sample_path("manifest.json")
     with open(manifest_file, "r", encoding="utf-8") as f:
         manifest = json.load(f)
 
@@ -457,28 +480,30 @@ async def audit_sample_endpoint(invoice_id: str):
     if not target_inv:
         raise HTTPException(status_code=404, detail=f"Invoice {invoice_id} not found.")
 
-    po_csv = DATA_DIR / "purchase_orders.csv"
-    po_json = DATA_DIR / "purchase_orders.json"
+    po_csv = get_sample_path("purchase_orders.csv")
+    po_json = get_sample_path("purchase_orders.json")
     if not session.purchase_orders:
         if po_csv.exists():
             session.purchase_orders = parse_purchase_orders(po_csv.read_bytes())
         elif po_json.exists():
             session.purchase_orders = parse_purchase_orders(po_json.read_bytes())
 
-    gr_csv = DATA_DIR / "goods_receipts.csv"
-    gr_json = DATA_DIR / "goods_receipts.json"
+    gr_csv = get_sample_path("goods_receipts.csv")
+    gr_json = get_sample_path("goods_receipts.json")
     if not session.goods_receipts:
         if gr_csv.exists():
             session.goods_receipts = parse_goods_receipts(gr_csv.read_bytes())
         elif gr_json.exists():
             session.goods_receipts = parse_goods_receipts(gr_json.read_bytes())
 
-    if not session.contract_rag.clauses and (DATA_DIR / "contracts.json").exists():
-        with open(DATA_DIR / "contracts.json", "r", encoding="utf-8") as f:
-            for c in json.load(f):
-                session.contract_rag.add_clause(ContractClause(**c))
+    contract_file = get_sample_path("contracts.json")
+    if not contract_file.exists():
+        contract_file = get_sample_path("contracts.csv")
+    if not session.contract_rag.clauses and contract_file.exists():
+        for c in parse_contract_clauses(contract_file.read_bytes()):
+            session.contract_rag.add_clause(c)
 
-    pdf_path = DATA_DIR / "invoices" / target_inv["file"]
+    pdf_path = get_sample_path("invoices") / target_inv["file"]
     content = pdf_path.read_bytes()
 
     await session.step_extract_invoices_parallel([(target_inv["file"], content)])

@@ -1,0 +1,22 @@
+[
+  {
+    "clause_id": "MSA-APEX-SEC-4.2",
+    "vendor": "Apex Industrial Supply",
+    "title": "All-Inclusive Freight Policy",
+    "content": "All orders under PO include standard delivery. Vendor shall not bill separate freight, delivery fees, or fuel surcharges.",
+    "category": "fees",
+    "prohibits_surcharges": true,
+    "allowed_payment_terms": "Net 30",
+    "discount_percentage": null
+  },
+  {
+    "clause_id": "MSA-NEXUS-SEC-9.1",
+    "vendor": "Nexus Cloud Hardware",
+    "title": "Fixed Rate Card Guarantee",
+    "content": "Prices stated in PO are fixed for 12 months. Any price escalation without prior written authorization is strictly void.",
+    "category": "pricing",
+    "prohibits_surcharges": false,
+    "allowed_payment_terms": "Net 30",
+    "discount_percentage": null
+  }
+]
